@@ -15,6 +15,26 @@ features and bug fixes.
 
 [F\* binaries on GitHub]: https://github.com/FStarLang/FStar/releases
 
+### Testing a binary package ###
+
+1. Test that the binary is good by expanding the archive and running:
+
+        $ make -C examples/unit-tests
+
+2. If you have OCaml installed run, the following command should print "Hello F*!"
+
+        $ make -C examples/hello ocaml
+
+3. If you have F# installed run, the following command should print "Hello F*!"
+
+        $ make -C examples/hello fs
+
+4. You can try out the full regression suite, but keep in mind that
+   things might fail because of timeouts if your machine is not
+   sufficiently powerful.
+
+        $ make -C examples
+
 ## Building F* from sources ##
 
 If you have a serious interest in F\* or want to report bugs then we
@@ -31,6 +51,9 @@ special flag. Therefore, the standard build process of F* is as follows:
   
   3. re-build F* using the OCaml compiler from the code generated at step 2
      (obtaining a faster native binary for F\*).
+
+If you build F* from sources you will also need to get a Z3
+binary. This is further explained towards the end of this document.
 
 **Alternative:**  If you don't care about efficiency and about the .NET
 dependency you can stop already after step 1.
@@ -195,5 +218,7 @@ https://github.com/Z3Prover/z3/releases/tag/z3-4.4.0
 
         $ make package -C src/ocaml-output
 
-3. Test that the binary is good by expanding the archive and running
-   `make` in the `examples` directory inside
+3. Run the testing of binary packages (described above)
+
+**Note**: to create the package successfully you will need tools like
+Madoko, make, git, zip, etc installed.

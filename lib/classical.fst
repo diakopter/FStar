@@ -1,7 +1,11 @@
 module FStar.Classical
 #set-options "--initial_fuel 0 --max_fuel 0 --initial_ifuel 0 --max_ifuel 0"
 
-(* My proposal would be to put this in Classic not in Tot *)
+(* one variant of excluded middle is provable by SMT *)
+val excluded_middle' : p:Type -> Lemma (requires (True))
+                                       (ensures (p \/ ~p))
+let excluded_middle' (p:Type) = ()
+
 assume val excluded_middle : p:Type -> GTot (b:bool{b = true <==> p})
 
 assume val forall_intro : #a:Type -> #p:(a -> Type) ->

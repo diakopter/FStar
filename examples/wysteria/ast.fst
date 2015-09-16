@@ -1,7 +1,6 @@
 (*--build-config
-    options:--admit_fsi FStar.OrdSet --admit_fsi FStar.OrdMap;
-    variables:LIB=../../lib;
-    other-files:$LIB/ordset.fsi $LIB/ordmap.fsi
+    options:--admit_fsi FStar.OrdSet --admit_fsi FStar.OrdMap --admit_fsi Prins;
+    other-files:ordset.fsi ordmap.fsi prins.fsi
  --*)
 
 module AST
@@ -10,30 +9,25 @@ open FStar.OrdMap
 
 open FStar.OrdSet
 
+open Prins
+
 type other_info = nat
 
 type varname = string
 
-type prin = nat
-
-val p_cmp: prin -> prin -> Tot bool
-let p_cmp p1 p2 = p1 <= p2
-
-type prins = s:ordset prin p_cmp{not (s = empty)}
-
-type eprins = ordset prin p_cmp
-
 type const =
-  | C_prin : c:prin -> const
-  | C_prins: c:prins -> const
+  | C_prin  : c:prin   -> const
+  | C_eprins: c:eprins -> const
+  | C_prins : c:prins  -> const
 
   | C_unit : const
-  | C_nat  : c:nat -> const
+  | C_nat  : c:nat  -> const
   | C_bool : c:bool -> const
 
 type exp' =
   | E_aspar     : ps:exp -> e:exp -> exp'
   | E_assec     : ps:exp -> e:exp -> exp'
+  | E_box       : ps:exp -> e:exp -> exp'
   | E_unbox     : e:exp  -> exp'
   | E_mkwire    : e1:exp -> e2:exp -> exp'
   | E_projwire  : e1:exp -> e2:exp -> exp'
@@ -141,9 +135,11 @@ type mode =
 type frame' =
   | F_aspar_ps     : e:exp -> frame'
   | F_aspar_e      : ps:prins -> frame'
+  | F_aspar_ret    : ps:prins -> frame'
   | F_assec_ps     : e:exp -> frame'
   | F_assec_e      : ps:prins -> frame'
   | F_assec_ret    : frame'
+  | F_box_ps       : e:exp -> frame'
   | F_box_e        : ps:prins -> frame'
   | F_unbox        : frame'
   | F_mkwire_ps    : e:exp -> frame'
@@ -184,11 +180,11 @@ type mode_inv (m:mode) (l:level) =
 
 val is_sec_frame: f':frame' -> Tot bool
 let is_sec_frame f' =
-  not (is_F_aspar_ps f' || is_F_aspar_e f' || is_F_box_e f')
+  not (is_F_aspar_ps f' || is_F_aspar_e f' || is_F_aspar_ret f')
 
 (* TODO: FIXME: workaround for projectors *)
-val ps_of_box_e_frame: f':frame'{is_F_box_e f'} -> Tot prins
-let ps_of_box_e_frame (F_box_e ps) = ps
+val ps_of_aspar_ret_frame: f':frame'{is_F_aspar_ret f'} -> Tot prins
+let ps_of_aspar_ret_frame (F_aspar_ret ps) = ps
 
 val stack_source_inv: stack -> mode -> Tot bool
 let rec stack_source_inv s (Mode as_m ps) = match s with
@@ -199,8 +195,8 @@ let rec stack_source_inv s (Mode as_m ps) = match s with
     (not (as_m = Par) || not (is_F_assec_ret f'))                  &&
     (not (as_m = Sec) || (not (as_m' = Par) || is_F_assec_ret f')) &&
     (not (as_m' = Sec) || (is_sec_frame f' && is_Cons tl))         &&
-    (not (is_F_box_e f') || (ps = ps_of_box_e_frame f'))                  &&
-    (ps = ps' || (subset ps ps' && is_F_box_e f'))                 &&
+    (not (is_F_aspar_ret f') || (ps = ps_of_aspar_ret_frame f'))   &&
+    (ps = ps' || (subset ps ps' && is_F_aspar_ret f'))             &&
     stack_source_inv tl m'
 
 val stack_target_inv: stack -> mode -> Tot bool
@@ -217,7 +213,7 @@ let rec stack_inv s m l =
   if is_Source l then stack_source_inv s m else stack_target_inv s m
 
 val is_sec_redex: redex -> Tot bool
-let is_sec_redex r = not (is_R_aspar r || is_R_box r)
+let is_sec_redex r = not (is_R_aspar r) //|| is_R_box r)
 
 (* TODO: FIXME: workaround for projectors *)
 val r_of_t_red: t:term{is_T_red t} -> Tot redex
@@ -283,3 +279,21 @@ let is_par c = is_Par (m_of_mode (m_of_conf c))
 
 val is_sec: config -> Tot bool
 let is_sec c = is_Sec (m_of_mode (m_of_conf c))
+
+(* TODO: FIXME: the discriminators should take extra args for type indices *)
+val is_clos: #meta:v_meta -> value meta -> Tot bool
+let is_clos #meta v = match v with//is_V_clos v || is_V_fix_clos v || is_V_emp_clos v
+  | V_clos _ _ _
+  | V_emp_clos _ _
+  | V_fix_clos _ _ _ _ -> true
+  | _                  -> false
+
+val get_en_b: #meta:v_meta -> v:value meta{is_clos v} -> Tot (env * varname * exp)
+let get_en_b #meta v = match v with
+  | V_clos en x e       -> en, x, e
+  | V_fix_clos en f x e ->
+    update_env #(Meta empty Cannot_b empty Cannot_w) en f (V_fix_clos en f x e), x, e
+  | V_emp_clos x e      -> empty_env, x, e
+
+val is_terminal: config -> Tot bool
+let is_terminal (Conf _ (Mode as_m _) s _ t) = as_m = Par && s = [] && is_T_val t

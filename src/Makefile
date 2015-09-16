@@ -209,6 +209,8 @@ fs: $(BOOT_ALL)
 
 fsharp-output: 
 	mkdir -p fsharp-output
+	make -C VS install-packages
+	cp ../bin/FSharp.PowerPack.* fsharp-output
 
 plain-fs-files: $(addprefix parser/, parseutil.fs parse.fs lex.fs parseit.fs) fstar/main.fs
 	cp $^ fsharp-output/ 
@@ -224,8 +226,12 @@ clean-boot-fs:
 # --------------------------------------------------------------------
 
 test:   clean $(BIN)/fstar.exe ocaml-test
-	make -C ../lib 
-	make -C ../examples 
+	make -C ../lib
+	make -C ../examples
+	make -C ../examples/hello ocaml
+	make -C ../examples/crypto rpc-test
+	make -C ../contrib/CoreCrypto/ml/ all test
+	make -C ../contrib/Platform/ml/
 
 test.net: clean $(BIN)/fstar.exe boot
 	make -C ../examples

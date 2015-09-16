@@ -1,3 +1,17 @@
+(*--build-config
+    options:--z3timeout 10 --verify_module MAC --admit_fsi FStar.Seq --max_fuel 4 --initial_fuel 0 --max_ifuel 2 --initial_ifuel 1 --admit_fsi FStar.IO;
+    variables:CONTRIB=../../contrib;
+    other-files:
+            ext.fst classical.fst
+            set.fsi set.fst
+            heap.fst st.fst all.fst
+            string.fst list.fst
+            seq.fsi seqproperties.fst
+            io.fsti
+            $CONTRIB/Platform/fst/Bytes.fst
+            $CONTRIB/CoreCrypto/fst/CoreCrypto.fst
+            sha1.fst
+  --*)
 (*
    Copyright 2008-2014 Nikhil Swamy and Microsoft Research
 
@@ -32,9 +46,21 @@ open IO
 opaque type key_prop : key -> text -> Type
 type pkey (p:(text -> Type)) = k:key{key_prop k == p}
 
+(* to model authentication, we log all genuine calls
+   to MACs; the ideal implementation below uses the
+   log to correct errors. *)
+
+type entry =
+  | Entry : k:key
+         -> t:text{key_prop k t}
+         -> m:tag
+         -> entry
+
+let log = ST.alloc #(list entry) []
+
 val keygen: p:(text -> Type) -> pkey p
-val mac:    k:key -> t:text{key_prop k t} -> tag
-val verify: k:key -> t:text -> tag -> b:bool{b ==> key_prop k t}
+val mac:    k:key -> t:text{key_prop k t} -> ST tag (requires (fun h -> True)) (ensures (fun h x h' -> modifies !{ log } h h'))
+val verify: k:key -> t:text -> tag -> ST (b:bool{b ==> key_prop k t}) (requires (fun h -> True)) (ensures (fun h x h' -> modifies !{} h h'))
 
 
 
@@ -63,18 +89,6 @@ let keygen (p: (text -> Type)) =
   let k = sample keysize in
   assume (key_prop k == p);
   k
-
-(* to model authentication, we log all genuine calls
-   to MACs; the ideal implementation below uses the
-   log to correct errors. *)
-
-type entry =
-  | Entry : k:key
-         -> t:text{key_prop k t}
-         -> m:tag
-         -> entry
-
-let log = ST.alloc #(list entry) []
 
 let mac k t =
   let m = hmac_sha1 k t in

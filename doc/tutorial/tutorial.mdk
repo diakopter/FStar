@@ -24,7 +24,7 @@ Colorizer     : fstar
 ~AnswerContent: border-style=solid border-width=1px border-color=black padding=0.5ex
 
 ~Code,~Pre : language=fstar
-                replace=/([a-zA-Z])([12])\b/\(\1\2|\1~\2~\)/g
+                replace=/([a-zA-Z])(\d)\b/\(\1\2|\1~\2~\)/g
                 replace=/([a-zA-Z])_([\dnm])\b/\(\1_\2|\1~\2~\)/g
                 replace=/_n1\b/\(_n1|~n-1~\)/g
 
@@ -213,7 +213,7 @@ inaccessible file is never accessed mistakenly.
 Our model of this scenario (which we'll make more realistic in later
 sections) proceeds in three easy steps.
 
-  1. Describe the policy using simple pure functions.
+  1. Define the policy using simple pure functions.
 
 
   2. Identify the security-sensitive primitives in the program
@@ -225,7 +225,7 @@ sections) proceeds in three easy steps.
      that the policy-protected primitives are never improperly accessed.
 
 
-### Describing a policy { #sec-policy }
+### Defining a policy { #sec-policy }
 
 The syntax of F\* is based closely on the OCaml syntax and the non-light
 syntax of F\#. An F\* program is composed of several modules. Each module
@@ -250,9 +250,9 @@ Afterwards `ACLs` defines our security policy as two boolean functions:
 `canWrite` and `canRead`:
 The `canWrite` function inspects its argument `f`
 using a *pattern matching expression*: it returns the boolean `true`
-when `f="C:/temp/tempfile"` and `false` otherwise. The function
+when `f="demo/tempfile"` and `false` otherwise. The function
 `canRead` is similar---a file is readable if it is writable, or if it
-is the `"C:/public/README"` file.
+is the `"demo/README"` file.
 
 ### Tying the policy to the file-access primitives
 
@@ -267,20 +267,15 @@ to F\* programs via the underlying framework, e.g., .NET or OCaml. We can
 describe a simple interface provided by the framework as follows:
 
 ~ Fragment {link=code/exercises/ex1a-safe-read-write.fst}
-[INCLUDE=code/exercises/ex1a-safe-read-write.fst:SystemIO]
+[INCLUDE=code/exercises/ex1a-safe-read-write.fst:FileIO]
 ~
 
-~CH
-Calling it System.IO makes this sound more primitive/canonical than it
-actually is. How about Simple.IO?
-~
-
-Here, we've defined an *interface* called `System.IO`, which uses the
+Here, we've defined an *interface* called `FileIO`, which uses the
 `ACLs` module. More importantly,
-`System.IO` provides two functions, `read` and `write`, which
+`FileIO` provides two functions, `read` and `write`, which
 presumably implement the corresponding operations on files.
 
-By using the `assume val` notation, we *declare* that `System.IO` provides
+By using the `assume val` notation, we *declare* that `FileIO` provides
 the `read` and `write` operations (they are *values*), but that we are
 *_not_ defining* those values here---they will be provided by an external
 module. Our use of `assume val` is much like the
@@ -313,7 +308,7 @@ guarded by a security check, how can we make sure that each check is
 adequate? We can use F\*'s type-checker to automate this kind of code
 review.
 
-Here's some simple, untrusted client code. It uses `System.IO`,
+Here's some simple, untrusted client code. It uses `FileIO`,
 defines some common file names, and then a function called
 `staticChecking`, which tries to read and write a few files.
 
@@ -332,7 +327,7 @@ that the `passwd` file does not have the type
 `:f:filename{canRead f}`, respectively `:f:filename{canWrite f}`.
 For instance, if we uncomment the `write` we get the following error message:
 
-<!-- mono ../../bin/fstar.exe --fstar_home ../.. code/exercises/ex1a-safe-read-write.fst -->
+<!-- fstar.exe code/exercises/ex1a-safe-read-write.fst -->
 ``` {language=""}
 Error ex1a-safe-read-write.fst(38,2-47,5): The following problems were found:
 	Subtyping check failed; expected type f:filename{(canWrite f)};
@@ -359,7 +354,7 @@ allows it, otherwise it raises an exception.
 ~
 Please note that the type of `checkRead` imposes no condition on the
 the input file `f`. When the `ACLs.canRead f` check succeeds the
-type-checker knows that the `System.IO.read f` is safe.
+type-checker knows that the `FileIO.read f` is safe.
 
 ~Exercise
 Write a function called `checkedWrite` that takes a filename `f` and a
@@ -398,7 +393,7 @@ already seen two uses of this feature, e.g, the type
 `:f:filename{canRead f}` is a *refinement* of the type `:filename`. It's
 a refinement because only a subset of the `:filename` values have this
 type, namely those that satisfy the `canRead` predicate. The
-refinement in the type of `System.IO.write` is similar. In traditional
+refinement in the type of `FileIO.write` is similar. In traditional
 ML-like languages, such types are inexpressible.
 
 In general, a refinement type in F\* has the form `:x:t{phi(x)}`, a
@@ -435,7 +430,7 @@ without entering an infinite loop; reading or writing the program's
 state; throwing exceptions; performing input or output; or, having any
 other effect whatsoever.
 
-On the other hand, an expression like `(System.IO.read "foo.txt")` is
+On the other hand, an expression like `(FileIO.read "foo.txt")` is
 inferred to have type-and-effect `:ML string`, meaning that this term
 may have arbitrary effects (it may loop, do IO, throw exceptions,
 mutate the heap, etc.), but if it returns, it always returns a
@@ -808,7 +803,7 @@ lemmas) to prove more properties about `factorial`, after you've defined
 `factorial` and given it some generally useful type like
 `:nat -> Tot nat`.
 
-A lemma is a total function that always returns the single `:unit` value
+A lemma is a _ghost_ total function that always returns the single `:unit` value
 `()`. As such, computationally, lemmas are useless---they have no effect
 and always return the same value, so what's the point? The point is that
 the type of the value returned by the lemma carries some useful
@@ -817,19 +812,23 @@ properties about your program.
 As a first lemma about `factorial`, let's prove that it always
 returns a positive number.
 
-    val factorial_is_positive: x:nat -> Tot (u:unit{factorial x > 0})
+    val factorial_is_positive: x:nat -> GTot (u:unit{factorial x > 0})
     let rec factorial_is_positive x =
       match x with
       | 0 -> ()
       | _ -> factorial_is_positive (x - 1)
 
 The statement of the lemma is the type given to `factorial_is_positive`,
-a total function on `x:nat` which returns a unit, but with the refinement
+a ghost total function on `x:nat` which returns a unit, but with the refinement
 that `factorial x > 0`. The next three lines define
 `factorial_is_positive` and proves the lemma using a proof by induction
 on `x`. The basic concept here is that by programming total functions, we
-can write proofs about other program fragments. We'll discuss such proofs
+can write proofs about other pure expressions. We'll discuss such proofs
 in detail in the remainder of this section.
+
+~ Remark
+In F\* an expression being ghost (computationally irrelevant) is an effect.
+~
 
 ### Dependent function types
 
@@ -841,22 +840,22 @@ See `max_ref_type` in `code/max.fst`?
 
 Let's start by looking a little closer at the statement of the lemma.
 
-    val factorial_is_positive: x:nat -> Tot (u:unit{factorial x > 0})
+    val factorial_is_positive: x:nat -> GTot (u:unit{factorial x > 0})
 
-This is your first *dependent function type* in F\*. Why *dependent*?
+This is a *dependent function type* in F\*. Why *dependent*?
 Well, the type of the result depends on the _value_ of the parameter
 `x:nat`. For example, `factorial_is_positive 0` has the type
-`:Tot (u:unit{factorial 0 > 0))` which is different from the type of
+`:Tot (u:unit{factorial 0 > 0))`, which is different from the type of
 `factorial_is_positive 1`.
 
 Now that we've seen dependent functions, we can elaborate a bit more
-on the general form of function types, which have the following form:
+on the general form of function types:
 
 ~ Center
 `:x_1:t_1 -> ... -> x_n:t_n[x_1 ... x\(~n-1~\)] -> E t[x_1 ... x_n]`
 ~
-This is to say that each of a function's formal parameters are named
-`x\(~i~\) `; and each of these names is in scope to the right of the first
+Each of a function's formal parameters are named
+`x\(~i~\)` and each of these names is in scope to the right of the first
 arrow that follows it. The notation `:t[x_1 ... x_m]` indicates that
 the variables `:x_1 ... x_m` may appear free in `:t`.
 
@@ -865,7 +864,7 @@ the variables `:x_1 ... x_m` may appear free in `:t`.
 How shall we specify that `factorial` is strictly increasing when its
 argument is greater than 2? Here's a first cut:
 
-    val factorial_is_increasing_1: x:(y:nat{y > 2}) -> Tot (u:unit{factorial x > x})
+    val factorial_is_increasing_1: x:(y:nat{y > 2}) -> GTot (u:unit{factorial x > x})
 
 This does the job, but the type of the function's argument is a bit
 clumsy, since we needed two names: `y` to restrict the domain to natural
@@ -875,12 +874,12 @@ syntactic sugar for it---we have seen it already in passing in the first
 type we gave to `factorial`. Using it, we can write the following type,
 which is equivalent to, but more concise than, the type above.
 
-    val factorial_is_increasing_2: x:nat{x > 2} -> Tot (u:unit{factorial x > x})
+    val factorial_is_increasing_2: x:nat{x > 2} -> GTot (u:unit{factorial x > x})
 
 Another bit of clumsiness that you have no doubt noticed is the result
 type of the lemmas which include a refinement of the
 `:unit` type. To make this lighter, F\* provides the `:Lemma` keyword which
-can be used in place of the `:Tot` effect.
+can be used in place of the `:GTot` effect.
 
 For example, the type of `factorial_is_increasing_2` is equivalent to the
 type of `factorial_is_increasing_3` (below), which is just a little
@@ -891,7 +890,7 @@ easier to read and write.
 We can also write it in the following way, when that's more convenient:
 
     val factorial_is_increasing_4: x:nat -> Lemma (requires (x > 2))
-                                                (ensures (factorial x > x))
+                                                  (ensures (factorial x > x))
 
 The formula after `requires` is the _pre-condition_ of the
 function/lemma, while the one after `ensures` is its _post-condition_.
@@ -947,7 +946,7 @@ goal `factorial x > x` from the `x > 3` and the property we obtained
 from our use of the induction hypothesis: again, Z3 proves this easily.
 
 ~ Exercise
-Prove the following monotonicity property for the fibonacci function:
+Prove the following increasingness property for the fibonacci function:
 ~~ ExerciseFragment {exname=ex3c-fibonacci}
 [INCLUDE=code/exercises/ex3c-fibonacci.fst:FibonacciIncreasing]
 ~~
@@ -993,6 +992,20 @@ Since type-checking this succeeds we know
 that the base case of the induction is trivially proved and need
 to focus our effort on the inductive case.
 
+~CH
+How about adding (proper) monotonicity?
+```
+val fact_monotone : n:nat -> m:nat -> Lemma (requires (n <= m))
+                                            (ensures (factorial n <= factorial m))
+                                            (decreases m)
+let rec fact_monotone n m =
+  match m - n with
+  | 0 -> ()
+  | _ -> fact_monotone n (m-1)
+```
+~
+
+
 ## Automatic induction { #auto-ind }
 
 Many of these proofs by induction are quite boring. You simply do case
@@ -1020,7 +1033,11 @@ We mentioned earlier that a refinement type has the form `:x:t{phi(x)}`.
 In its primitive form, `phi` is in fact a type, a predicate on the value
 `x:t`. We allow you to use a boolean function in place of a type: under
 the covers, we implicitly coerce the boolean to a type, by adding the
-coercion `b2t (b:bool) : Type = (b == true)`. The type '`==`' is the type
+coercion
+
+    b2t (b:bool) : Type = (b == true)
+
+The type '`==`' is the type
 constructor for the equality predicate; it is different from '`=`', which
 is a boolean function comparing a pair of values. Additionally, '`==`' is
 heterogeneous: you can speak about equality between any pair of values,
@@ -1037,7 +1054,7 @@ start to write refinement formulas with quantifiers, the distinction
 between the two will become apparent.
 
 Both the universal quantifier `forall`, and the existential quantifier
-`exists`, are only available at `:Type`. When you mix refinements that
+`exists`, are only available in `:Type`. When you mix refinements that
 include boolean function and the quantifiers, you need to use the
 propositional connectives. For example, the following formula
 is well-formed:
@@ -1057,51 +1074,6 @@ The reason is that the quantifier is a type, whereas the `:&&` expects a
 boolean. While a boolean can be coerced to a type, there is no coercion
 in the other direction.
 
-
-<!--
-module FirstProofs
-
-val factorial: nat -> Tot nat
-let rec factorial n = if n = 0 then 1 else n * factorial (n - 1)
-
-val factorial_is_positive: x:nat -> Tot (u:unit{factorial x > 0})
-let rec factorial_is_positive = function
-  | 0 -> ()
-  | x -> factorial_is_positive (x - 1)
-
-val factorial_is_increasing: x:nat{x >= 2} -> Tot (u:unit{factorial x >= x})
-let rec factorial_is_increasing = function
-  | 2 -> ()
-  | x -> factorial_is_increasing (x - 1)
-
-val factorial_is_doubling: x:nat{x >= 3} -> Tot (u:unit{factorial x >= 2 * x})
-let rec factorial_is_doubling = function
-  | 3 -> ()
-  | x -> factorial_is_doubling (x - 1)
-
-val factorial_is_squaring: x:nat{x >= 4} -> Tot (u:unit{factorial x > x * x})
-let rec factorial_is_squaring = function
-  | 4 -> ()
-  | x -> factorial_is_squaring (x - 1)
-
-(* (\* This is getting to be a bit much for Z3 *\) *)
-(* val factorial_is_cubing: x:nat{x > 5} -> Tot (u:unit{factorial x >= x * x * x}) *)
-(* let rec factorial_is_cubing = function *)
-(*   | 6 -> () *)
-(*   | x -> factorial_is_cubing (x - 1) *)
-
-val fibonacci: nat -> Tot nat
-let rec fibonacci = function
-  | 0
-  | 1 -> 1
-  | n -> fibonacci (n - 1) + fibonacci (n - 2)
-
-val fibonacci_is_increasing: n:nat -> Lemma (requires True)
-                                          (ensures (fibonacci n >= n))
-                                          []
-let rec fibonacci_is_increasing n = if n > 1 then fibonacci_is_increasing (n - 1) else ()
-
--->
 
 # Simple inductive types
 
@@ -1124,7 +1096,7 @@ Here's the standard definition of (immutable) lists in F\*.
 
 We note some important conventions for the constructors of a data type in F\*.
 
-+ Constructor names must begin with a captial letter.
++ Constructor names must begin with a capital letter.
 
 + When not writing effects in constructor types,
   the default effect on the result is `Tot`
@@ -1229,7 +1201,7 @@ decides whether `x` is present in the `l` or not, then prove it satisfies the
 following property:
 ~~ ExerciseFragment {exname=ex4c-mem}
 val append_mem:  l1:list 'a -> l2:list 'a -> a:'a
-        -> Lemma (ensures (mem a (append l1 l2) <==>  mem a l1 || mem a l2))
+        -> Lemma (ensures (mem a (append l1 l2)  <==>  mem a l1 || mem a l2))
 ~~
 ~~ AnswerFragment {exname=ex4c-mem}
 
@@ -1239,7 +1211,7 @@ let rec mem a l = match l with
   | hd::tl -> hd=a || mem a tl
 
 val append_mem:  l1:list 'a -> l2:list 'a -> a:'a
-                  -> Lemma (ensures (mem a (append l1 l2) <==>  mem a l1 || mem a l2))
+    -> Lemma (ensures (mem a (append l1 l2)  <==>  mem a l1 || mem a l2))
 let rec append_mem l1 l2 a = match l1 with
   | [] -> ()
   | hd::tl -> append_mem tl l2 a
@@ -1280,7 +1252,7 @@ got a function "(fun _682:<UNKNOWN> -> (match _682 with (Nil )  -> Nil
 ~
 
 However, F\* refuses to accept this as a valid type for `reverse`:
-proving this property requires two separate induction steps, neither of
+proving this property requires two separate inductions, neither of
 which F\* can perform automatically.
 
 Instead, one can use two lemmas to prove the property we care about. Here
@@ -1304,31 +1276,16 @@ the induction hypothesis but also the `snoc_cons` lemma we proved above.
 ~Exercise
 Prove that reverse is injective, i.e.,
 ~~ ExerciseFragment {exname=ex4d-reverse}
-val rev_injective_1: l1:list 'a -> l2:list 'a
-                -> Lemma (reverse l1 = reverse l2 ==> l1 = l2)
+[INCLUDE=code/exercises/ex4d-reverse.fst:RevInjective]
 ~~
 ~~ Answer
 Perhaps you did it like this:
 ~~~ SolutionFragment {exname=ex4d-reverse}
-    val snoc_injective: l1:list 'a -> h1:'a -> l2:list 'a -> h2:'a
-                     -> Lemma (snoc l1 h1 = snoc l2 h2 ==> l1 = l2 && h1 = h2)
-    let rec snoc_injective l1 h1 l2 h2 = match l1, l2 with
-      | _::tl1, _::tl2 -> snoc_injective tl1 h1 tl2 h2
-      | _ -> ()
-
-    val rev_injective_1: l1:list 'a -> l2:list 'a
-                    -> Lemma (reverse l1 = reverse l2 ==> l1 = l2)
-    let rec rev_injective_1 l1 l2 = match (l1, l2) with
-      | hd1::tl1, hd2::tl2 ->
-        rev_injective_1 tl1 tl2;
-        snoc_injective (reverse tl1) hd1 (reverse tl2) hd2
-      | _ -> ()
+[INCLUDE=code/solutions/ex4d-reverse.fst:RevInjective1]
 ~~~
 That's quite a tedious proof, isn't it. Here's a simpler proof.
 ~~~ SolutionFragment {exname=ex4d-reverse}
-    val rev_injective_2: l1:list 'a -> l2:list 'a
-                     -> Lemma (reverse l1 = reverse l2 ==> l1 = l2)
-    let rev_injective_2 l1 l2 = rev_involutive l1; rev_involutive l2
+[INCLUDE=code/solutions/ex4d-reverse.fst:RevInjective2]
 ~~~
 The `rev_injective_2` proof is based on the idea that every involutive
 function is injective. We've already proven that `reverse` is
@@ -1353,7 +1310,9 @@ Here is the familiar `map`:
 
 It takes a function `f` and a list `l` and it applies `f` to each element in `l`
 producing a new list. More precisely `map f [a1; ...; a_n]` produces the list
-`[f a1; ...; f a_n]`.
+`[f a1; ...; f a_n]`. For example:
+
+    map (fun x -> x + 1) [0;1;2] = [1;2;3]
 
 As usual, without any specification, F\* will infer for `map` type
 `:('a -> 'b) -> list 'a -> list 'b`. Written explicitly, the type of
@@ -1375,17 +1334,6 @@ lead to some code duplication. We plan to address this by allowing you
 to write more than one type for a value, an ad hoc overloading
 mechanism.
 
-We can use assertions to test expected properties of programs. For example:
-
-    assert (map (fun x -> x + 1) [0;1;2] = [1;2;3]);
-
-~CH
-Again, this is not real code
-~
-~NS
-We are showing code snippets throughout, not complete programs. So, I don't get it ...
-are you upset because this line is not a valid top-level expression?
-~
 
 ### Finding
 
@@ -1416,7 +1364,9 @@ Is it better to do this intrinsically or extrinsically? Do it both ways.
 
 ~Exercise
 Define the `fold_left` function on lists, so that
-`fold_left f a [b1; ...; bn]` computes `f (... (f (f a b1) b2) ...) bn`.
+
+    fold_left f a [b1; ...; bn] = f (... (f (f a b1) b2) ...) bn
+
 Prove that `(fold_left Cons [] l = reverse l)`.
 (The proof is a level harder from what we've done so far)
 ~~ ExerciseFragment {exname=ex4f-fold-left}
@@ -1455,10 +1405,10 @@ term is the application of a particular constructor. For the `list` type,
 we have two discriminators:
 
     val is_Nil: list 'a -> Tot bool
-    let is_Nil = function [] -> true | _ -> false
+    let is_Nil xs = match xs with [] -> true | _ -> false
 
     val is_Cons: list 'a -> Tot bool
-    let is_Cons = function _::_-> true | _ -> false
+    let is_Cons xs = match xs with _::_-> true | _ -> false
 
 ### Projectors
 
@@ -1580,40 +1530,32 @@ This is equivalent to the following, more verbose, source program:
 
 # Proving termination { #sec-termination }
 
-Every total function is proved terminating in F\*. Termination proofs in
-F\* are based entirely on semantic criteria, not syntactic conditions. We
-quickly sketch the basic structure of these termination proofs---you'll
-need to understand a bit of this in order to write more interesting
-programs.
+In F\* every pure function is proved to terminate. The termination
+check used by F\* is based on a semantic criterion, not syntactic
+conditions. We quickly sketch the basic structure of the F\*
+termination check---you'll need to understand a bit of this in order
+to write more interesting programs.
 
-## A well-founded partial order on all terms
+## A well-founded partial order on values
 
-The basic idea behind all termination proofs is to define a measure, some
-function on the program's state, and to show that this measure strictly
-decreases as the program reduces. For this to guarantee termination, we
-need the measure to be a function into a set equipped with a well-founded
-partial order. A relation `R` is a well-founded partial order on a set
-`S` if, and only if, `R` is a partial order on `S` and there are no
-infinite descending chains in `S` related by `R`. For example, taking `S`
-to be `nat`, the set of natural numbers, the integer ordering `<` is a
-well-founded partial order (in fact, it is a total order). Since the
-measure strictly decreases each time the program takes a step, and there
-are no infinite descending chains, this guarantees that the program eventually
-can take no more steps, i.e., it terminates.
+In order to prove a function terminating in F\* one provides a
+measure: a pure expression depending on the function's arguments. F\*
+checks that this measure strictly decreases on each recursive call.
+The measure for the arguments of the call is compared to the measure
+for the previous call according to a well-founded partial order on F\*
+values. We write `v1 << v2` when `v1` _precedes_ `v2` in this order.
 
-The type system of F\* is parameterized by the choice of a well-founded
-partial order on terms. We call this the *precedes* relation, a binary
-relation on F\* terms. We write `e1 << e2` when `e1` precedes `e2`. At
-each recursive call, we check that the arguments of the call precede the
-formal parameters of the previous call according to this relation: thus
-ensuring that the no infinitely deep recursion is possible.
+> A relation `R` is a well-founded partial order on a set `S` if, and
+> only if, `R` is a partial order on `S` and there are no infinite
+> descending chains in `S` related by `R`. For example, taking `S` to
+> be `nat`, the set of natural numbers, the integer ordering `<` is a
+> well-founded partial order (in fact, it is a total order).
 
+Since the measure strictly decreases on each recursive call, and there
+are no infinite descending chains, this guarantees that the function
+eventually stops making recursive calls, i.e., it terminates.
 
-## The precedes relation: default axioms
-
-At the moment, by default, F\* instantiates the *precedes* relation to
-include the following properties (i.e., it is the union of the three
-relations below):
+### The precedes relation
 
 1. **The ordering on integers**: Given `i, j : nat`,
    we have `i << j <==> i < j`.
@@ -1621,18 +1563,13 @@ relations below):
    _Note_: Negative integers are not related by the `<<` relation,
    which is only a _partial_ order.
 
-2. **The subterm ordering on inductive types**: For any pure term `e` of
-    an inductive type `T`, if `e=D e1 ... en` we include `e_i << e`, for
-    all `i`. That is, the sub-terms of a well-typed constructed term
-    precede the constructed term. (The exception to this rule is if `T`
-    is an instance of `lexPair`).
+2. **The subterm ordering on inductive types**: For any value
+    `D v1 ... vn` of an inductive type (where `D` is a constructor applied
+    to arguments `v1` to `vn`) we include `v_i << v`, for all `i`.
+    That is, the sub-terms of a well-typed constructed term
+    precede the constructed term. (The exception to this rule is `lex_t` below).
 ~CH
 I guess there is also an exception for types with negative occurrences, right?
-~
-
-~MK
-Maybe its clear for you, but for me it's not clear what `v` and `D` are? Is `D` a constructor of type `T`?
-`v` a value? Do we require that `v=e`?
 ~
 
 3. **The lexicographic ordering on lex_t**, as described below.
@@ -1654,22 +1591,19 @@ call, e.g, in the second branch, `n` increases from `0` to `1`. However,
 this function does in fact terminate, and F\* proves that it does.
 
 The reason is that although each argument does not decrease in every
-recursive call, when taken together, the ordered pair of arguments `m, n`
+recursive call, when taken together, the ordered pair of arguments `(m,n)`
 does decrease according to a *lexical ordering* on pairs.
 
 In its standard prelude, F\* defines the following inductive type:
 
     type lex_t =
-      | LexCons: 'a -> lex_t -> lex_t
-      | LexTop : lex_t 'a 'b
-
+      | LexTop  : lex_t
+      | LexCons : #a:Type -> a -> lex_t -> lex_t
 
 **The lexicographic ordering on `lex_t`** is the following:
 
-* Given well-typed pure terms `v1, v2, v1', v2'`,
-    `LexCons v1 v2 << LexCons v1' v2'`, if and only if, either
-    `v1 << v1'`; or `v1=v1'` and `v2 << v2'`.
-
+* `LexCons v1 v2 << LexCons v1' v2'`, if and only if, either
+  `v1 << v1'`; or `v1=v1'` and `v2 << v2'`.
 
 * If `v:lex_t` and `v <> LexTop`, then `v << LexTop`.
 
@@ -1679,7 +1613,7 @@ We could explain what that means, that longer `lex_t` are smaller?
 
 **We include the following syntactic sugar**:
 
->>`%[v1;...;v_n]` is shorthand for `(LexCons v_1 ... (LexCons v_n LexTop))`
+>`%[v1;...;v_n]` is shorthand for `(LexCons v_1 ... (LexCons v_n LexTop))`
 
 ## A termination proof in detail
 
@@ -2316,7 +2250,7 @@ let is_value e =
   | EFalse     -> true
   | _          -> false
 ```
-The `EAbs`, `ETrue`, and `EFalse` cases share the same right-hand-side (`false`),
+The `EAbs`, `ETrue`, and `EFalse` cases share the same right-hand-side (`true`),
 which is a way to prevent duplication in definitions.
 
 In order to give a semantics to function applications we define a
@@ -2988,6 +2922,15 @@ let rec eval e =
   if is_value e then e
   else eval (typed_step e)
 ~~~
+or using the `progress` and `preservation` lemmas instead of `typed_step`
+(suggested by Guido Martinez):
+```
+val eval : e:exp{is_Some (typing empty e)} ->
+  Dv (v:exp{is_value v && typing empty v = typing empty e})
+let rec eval e = match step e with
+  | None -> progress e; e
+  | Some e' -> preservation e; eval e'
+```
 Here is another solution that only uses the substitution lemma:
 ~~~ SolutionFragment {exname=ex7d-stlc-eval}
 val eval' : e:exp{is_Some (typing empty e)} ->
@@ -3180,6 +3123,12 @@ kind Predicate (a:Type) = a -> Type
 Now, the kind `Predicate a` is an abbreviation for `a -> Type`.
 
 # Specifying effects
+
+~CH
+This seems like super advanced stuff that should come a lot
+later in the tutorial. How about swapping 2 references first?
+(have a couple of such simple examples in the Saarbrucken course)
+~
 
 F\* provides a mechanism to define new effects. As mentioned earlier,
 the system is already configured with several basic effects, including
@@ -3837,86 +3786,8 @@ current state contains the appropriate permission.
 
 Here's how it goes:
 
-
 ```
-module DynACLs
-open Heap
-open ST      (* we open the Heap and ST namespaces to use stateful primitives *)
-type file = string
-
-(* Each entry is an element in our access-control list *)
-type entry =
-  | Readable of string
-  | Writable of string
-type db = list entry
-
-(* The acls reference stores the current access-control list, initially empty *)
-let acls = ref []
-
-(* We define two pure functions that test whether
-   the suitable permission exists in some db *)
-let canRead db file =
-  is_Some (List.find (function Readable x | Writable x -> x=file) db)
-
-let canWrite db file =
-  is_Some (List.find (function Writable x -> x=file | _ -> false) db)
-
-(*
-   Here are two stateful functions which alter the access control list.
-   In reality, these functions may themselves be protected by some
-   further authentication mechanism to ensure that an attacker cannot
-   alter the access control list
-
-   F* infers a fully precise predicate transformer semantics for them
-*)
-let grant e  = acls := e::!acls
-let revoke e = acls := List.filter (fun e' -> e<>e') !acls
-
-(* Next, we model two primitives that provide access to files *)
-
-(* We use two heap predicates, which will serve as stateful pre-conditions *)
-type CanRead (f:file) (h:heap)  = canRead  (Heap.sel h acls) f
-type CanWrite (f:file) (h:heap) = canWrite (Heap.sel h acls) f
-
-(* In order to call `read`, you need to prove
-   the `CanRead f` permission exists in the input heap *)
-assume val read:   f:file -> ST string
-       (requires (CanRead f))
-       (ensures (fun h s h' -> h=h'))
-
-(* Likewise for `delete` *)
-assume val delete: f:file -> ST unit
-       (requires (CanWrite f))
-       (ensures (fun h s h' -> h=h'))
-
-(* Then, we have a top-level API, which provides protected
-   access to a file by first checking the access control list.
-
-   If the check fails, it raises a fatal exception using `failwith`.
-   As such, it is defined to have effect `All`, which combines
-   both state and exceptions.
-
-   Regardless, the specification proves that `checkedDelete`
-   does not change the heap.
- *)
-val checkedDelete: file -> All unit
-    (requires (fun h -> True))
-    (ensures (fun h x h' -> h=h'))
-let checkedDelete file =
-  if canWrite !acls file
-  then delete file
-  else failwith "unwritable"
-
-(* Finally, we have a top-level client program *)
-val test_acls: file -> unit
-let test_acls f =
-  grant (Readable f);     (* ok *)
-  let _ = read f in       (* ok --- it's in the acl *)
-  (* delete f;               not ok --- we're only allowed to read it *)
-  checkedDelete f;          (* ok, but fails dynamically *)
-  revoke (Readable f);
-  (* let _ = read f in    (* not ok any more *)
-  ()
+[INCLUDE=code/exercises/ex10a-acls-variant.fst]
 ```
 
 ~Exercise
@@ -5440,7 +5311,7 @@ Hint: have a look e.g. at the HMAC construction.
 
 ## Stateful Authenticated Encryption
 
-A typical guarantees provided by a secure channel protocol is that
+A typical guarantee provided by a secure channel protocol is that
 messages are received in the same order in which they were sent. To
 achieve this, we construct a stateful, authenticated encryption scheme from
 a (stateless) “authenticated encryption with additional data” (AEAD)

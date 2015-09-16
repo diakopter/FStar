@@ -134,3 +134,24 @@ let is_Some = function (*consider redefining Option.isSome as this function*)
 let is_None o = not (is_Some o)
 let raise e = raise e
 
+let ___Some___v x = match x with
+  | Some v -> v
+  | None   -> failwith "impossible"
+
+type ('a, 'b) either =
+  | Inl of 'a
+  | Inr of 'b
+
+let is_Inl = function
+  | Inl _ -> true
+  | _     -> false
+  
+let is_Inr x = not (is_Inl x)
+
+let ___Inl___v x = match x with
+  | Inl v -> v
+  | _     -> failwith "impossible"
+  
+let ___Inr___v x = match x with
+  | Inr v -> v
+  | _     -> failwith "impossible"

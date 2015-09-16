@@ -74,64 +74,58 @@ development and syntax highlighting.
 
 #### Emacs
 
-The [Tuareg Mode] for OCaml works quite well for F* too.
-Go for 2.0.9 (2015-03-25) or later to avoid some bugs that are already fixed.
-Tuareg is easiest to install using [MELPA].
-To use MELPA add this to your `.emacs` or `.emacs.d/init.el` file:
+[fstar-mode] implements support for F* programming, including
+  
+  * Syntax highlighting
+  * Unicode rendering (with prettify-symbols-mode)
+  * Indentation
+  * Real-time verification (requires the Flycheck package)
+  * Interactive proofs (à la Proof-General)
+
+ F*-mode requires Emacs 24.3 or newer, and is distributed through [MELPA]. Add the following to your Emacs init file (usually `.emacs`), if it is not already there:
+
 ```elisp
 (require 'package)
-(add-to-list 'package-archives
-             '("melpa" . "http://melpa.milkbox.net/packages/") t)
-```
-Now do `M-x package-install` and install `tuareg`.
-
-Then add the rest of the configuration to `.emacs` or `.emacs.d/init.el`:
-```elisp
-(add-hook 'tuareg-mode-hook 'tuareg-imenu-set-imenu)
-(setq auto-mode-alist
-      (append '(("\\.ml[ily]?$" . tuareg-mode)
-                ("\\.topml$" . tuareg-mode))
-              auto-mode-alist))
-(setq auto-mode-alist
-      (append '(("\\.fs[tiy]?$" . tuareg-mode))
-          auto-mode-alist))
-```
-Finally, if you want easy navigation through F* error messages also
-add this to your `.emacs` or `.emacs.d/init.el`:
-```elisp
-(add-to-list 'compilation-error-regexp-alist
- '("\\([0-9a-zA-Z._/-]*.fst\\)(\\([0-9]+\\)\\,\\([0-9]+\\)-[0-9]+\\,[0-9]+)" 1 2 3))
-(add-to-list 'compilation-error-regexp-alist
- '("^ERROR: Syntax error near line \\([0-9]+\\), character \\([0-9]+\\) in file \\(.*\\)$" 3 1 2))
+(add-to-list 'package-archives '("melpa" . "http://melpa.org/packages/") t)
+(package-initialize)
 ```
 
-[Tuareg Mode]: https://github.com/ocaml/tuareg
+Restart Emacs, and run <kbd>M-x package-refresh-contents</kbd>, then <kbd>M-x package-install RET fstar-mode RET</kbd>. Future updates can be downloaded using <kbd>M-x list-packages</kbd>.
+
+If `fstar.exe` is not already in your path, set the `fstar-executable` variable:
+
+```elisp
+(set-default fstar-executable "PATH-TO-FSTAR.EXE")
+```
+
+[fstar-mode]: https://github.com/FStarLang/fstar-mode.el
 [MELPA]: http://melpa.org
 
 ### Executing F* code
 
-By default F* only verifies the input code, it does not execute it.
-To execute F* code one needs to translate it to OCaml
-using the OCaml backend (the `--codegen OCaml` command-line argument to F\*).
-The generated executable OCaml code most often depends on a support library.
-The sources for this suport library are available in the `src/ocaml-output` directory
-and can be compiled by installing all pre-requisites and running `make` there
-(previous binaries don't include `src/ocaml-output`, so you will need the F\*
-sources for this). The pre-requisites and compilation process are the same as for
-[building F\* using the OCaml snapshot].
+By default F* only verifies the input code, it does not compile or execute it.
+To execute F* code one needs to translate it to either OCaml or F\#, using 
+F\*'s code extraction facility---this is invoked using the command line
+argument `--codegen OCaml` or `--codegen FSharp`.
 
-[building F\* using the OCaml snapshot]:https://github.com/FStarLang/FStar/blob/master/INSTALL.md#building-f-using-the-ocaml-snapshot
+The OCaml extractor will produce `<ModuleName>.ml` files for each F*
+module in the code; whereas the F\# version will emit `<ModuleName>.fs`.
 
-The OCaml backend will produce `<ModuleName>.ml` files for each F*
-module in the code.
-Those `.ml` files can then be compiled into executable code using the
-following command in the directory containing the ocaml files:
-```
-ocamlfind ocamlopt -o program -package batteries -linkpkg -thread -I $FSTAR_HOME/src/ocaml-output/ $FSTAR_HOME/src/ocaml-output/support.ml <OCamlFiles>.ml
-```
-where `program` is the desired name of the produced executable.
-Linking the `ocaml-output` directory and `support.ml` is required if
-the F* code used any built-in functions.
+The extracted code often relies on a support library, providing, for example, 
+implementations of various primitive functions provided by F\*'s standard library. 
+The sources for this support library are in `lib/fs` (for F\#) and `lib/ml` (for OCaml).
+To compile the code further and obtain an executable, you will need to link the
+extracted code with the support library.
+
+Several examples of how this process works can be found in the repository. 
+
+  * `examples/hello` provides `hello.fst` and a `Makefile` that compiles and executes a hello world program in both F\# and OCaml.
+  * `doc/tutorial/code/exercises` provides `ex1a-safe-read-write.fst` (a simplistic example of access control on files) and `Makefile`. The build target `acls-fs.exe` compiles and runs the code using F\#; `acls-ocaml.exe` illustrates a simple way to compile and run in OCaml; while `hard-acl` illustrates a harder, but more general way to run in OCaml.
+  * `examples/crypto` provides `rpc.fst` and a `Makefile` with the `rpc-ml` target providing a way to run a small, verified example of remote procedure calls in OCaml (while linking with OpenSSL).
+  * `src/ocaml-output` provides a `Makefile` which we use to [bootstrap the F\* compiler in OCaml]. 
+  * `src/Makefile` provides a make target `boot-fsharp` which we use to bootstrap the F\* compiler in F\#.
+  * `examples/wysteria/Makefile` contains make targets for extracting and compiling Wysteria code. Target `codegen` generates code with some admitted interfaces (`lib/ordset.fsi`, `lib/ordmap.fsi`, and `ffi.fsi`) and target `ocaml` compiles the extracted code providing concrete implementations of those interfaces.
+  
 
 ### Old F* versions (v0.7.1 and earlier) ###
 
