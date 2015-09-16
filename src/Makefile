@@ -13,6 +13,9 @@ FORMAT_SRC=$(addprefix format/, $(FORMAT))
 EXTRACTION=ml-syntax.fs env.fs util.fs codegen.fsi codegen.fs extracttyp.fs extractexp.fs extractmod.fs
 EXTRACTION_SRC=$(addprefix extraction/, $(EXTRACTION))
 
+CEXTRACTION=pretty_print.fs c-syntax.fs c-extracttyp.fs c-extractmod.fs transform.fs
+CEXTRACTION_SRC=$(addprefix c-extraction/, $(CEXTRACTION))
+
 PARSER=ast.fs parseutil.fs parse.fs lexhelp.fs lex.fs dsenv.fsi dsenv.fs desugar.fsi desugar.fs parseit.fsi parseit.fs driver.fs
 PARSER_SRC=$(addprefix parser/, $(PARSER))
 PARSER_NOGEN=ast.fs parseutil.fs parse.fsy lexhelp.fs lex.fsl dsenv.fs desugar.fs parseit.fsi parseit.fs driver.fs
@@ -35,7 +38,7 @@ BUILD_VERSION  =
 OTHERFLAGS    := --optimize+ --debug:full --nologo -g -O
 OTHERFLAGS    += --mlcompatibility $(addprefix --define:, $(BUILD_VERSION))
 
-ALL_DLLS    = basic.dll format.dll absyn.dll extraction.dll parser.dll tc.dll tosmt.dll
+ALL_DLLS    = basic.dll format.dll absyn.dll extraction.dll cextraction.dll parser.dll tc.dll tosmt.dll
 FSHARP_LIBS = System.Runtime.Serialization.dll System.Xml.dll $(BIN)/FSharp.PowerPack.dll $(BIN)/FSharp.PowerPack.Compatibility.dll $(BIN)/FSharp.PPrint.dll
 OTHER_DLLS  =
 BASELIBS    = $(addprefix -r , $(FSHARP_LIBS) $(OTHER_DLLS))
@@ -118,6 +121,10 @@ $(BIN)/format.dll: $(FORMAT_DEPS) $(FORMAT_SRC)
 EXTRACTION_DEPS=$(addprefix $(BIN)/, basic.dll absyn.dll format.dll tc.dll)
 $(BIN)/extraction.dll: $(EXTRACTION_DEPS) $(EXTRACTION_SRC)
 	$(FSC) $(OTHERFLAGS) -a -o $@ $(BASELIBS) $(addprefix -r , $(EXTRACTION_DEPS)) $(EXTRACTION_SRC)
+
+CEXTRACTION_DEPS=$(addprefix $(BIN)/, basic.dll absyn.dll format.dll tc.dll tosmt.dll)
+$(BIN)/cextraction.dll: $(CEXTRACTION_DEPS) $(CEXTRACTION_SRC)
+	$(FSC) $(OTHERFLAGS) -a -o $@ $(BASELIBS) $(addprefix -r , $(CEXTRACTION_DEPS)) $(CEXTRACTION_SRC)
 
 PARSER_DEPS=$(addprefix $(BIN)/, basic.dll absyn.dll tc.dll)
 $(BIN)/parser.dll: $(PARSER_DEPS) $(PARSER_SRC)
