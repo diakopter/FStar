@@ -1,0 +1,87 @@
+(* --build-config
+    options:--admit_fsi FStar.Set --admit_fsi FStar.Seq --verify_module C_Trans;
+    variables:LIB=../../lib;
+  other-files:$LIB/classical.fst $LIB/ext.fst $LIB/set.fsi $LIB/seq.fsi $LIB/heap.fst $LIB/st.fst $LIB/all.fst $LIB/seqproperties.fst
+  --*)
+
+
+module C_Trans
+
+open FStar.Seq
+
+type ptr (a:Type) = | Ptr: v:a -> ptr a
+
+type list (a:Type) =
+  | Nil
+  | Cons: hd:a -> tl:list a -> list a
+
+type pair (a:Type) (b:Type) = | Pair: fst:a -> snd:b -> pair a b
+
+type option (a:Type) =
+  | None
+  | Some : v:a -> option a
+
+(* Array with immutable length (check how to works out) *)
+//type array (a:Type) = | Array : l:nat -> c:ref (s:seq a{Seq.length s = l})  -> array a
+
+(* Test type, not polymorphic *)
+type t =
+  | A
+  | B
+  | C: x:int -> t
+  | D: x:int -> y:char -> t
+
+val hd: #a:Type -> l:list a{ is_Cons l } -> Tot a
+let hd l =
+  Cons.hd l
+
+
+val test_hd: int -> Tot int
+let test_hd x =
+  let l = Cons x Nil in
+  let l2 = Cons 1 l in
+  let res = hd l2 in
+  res
+
+val test_hd_1: unit -> Tot int
+  let test_hd_1 () =
+    let x = 2 in
+    let l = Cons x Nil in
+    let l3 = Cons 1 l in
+    let res = hd l3 in
+    res
+
+val test_hd_2: #a:Type -> x:a -> y:a -> Tot a
+let test_hd_2 x y =
+  let l = Cons x (Cons y Nil) in
+  let res = hd l in
+  res
+
+val test_pair_1: #a:Type -> #b:Type -> x:a -> y:b -> Tot (pair a b)
+let test_pair_1 x y =
+  let res = Pair x y in
+  res
+
+val test_pair_2: #a:Type -> x:char -> y:a -> Tot (pair char a)
+let test_pair_2 x y =
+  let res = Pair x y in
+  res
+
+val test_pair_3: x:char -> y:int -> Tot (pair char int)
+let test_pair_3 x y =
+  let res = Pair x y in
+  res
+
+val global_test: x:char -> y:int -> Tot int
+let global_test x y =
+  let z = x in
+  let a1 = test_pair_1 x z in
+  let a2 = test_pair_1 x y in
+  let a3 = test_pair_2 x y in
+  let a4 = test_pair_3 x y in
+  let res = y in
+  res
+
+let rec double x = 2 * x
+and triple x = 3 * x
+and lalala x = x
