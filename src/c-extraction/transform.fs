@@ -273,6 +273,7 @@ let rec process_poly' env context sigelt =
     | Sig_pragma _ -> context
 
 let process_poly (env:FStar.Tc.Env.env) (context:context) m =
+    if m.name.str = "Prims" then context else
     List.fold (process_poly' env) context m.declarations
 
 let mk_new_fun_lid (lid:lident) (typs:list<lident>) : string = "Not implemented yet\n"
@@ -300,7 +301,10 @@ let rec get_typ_args_from_typ (t:typ) =
         let has_poly = List.fold (fun b x -> match x with | Some _ -> true | _ -> b) false args in
         if has_poly then args
         else []
-    | _ -> failwith ("Unexpected typ' : " + (get_typ_con t))
+    | Typ_app(ty, args) ->
+        // TODO : FIXME !
+        []
+    | _ -> failwith ("Unexpected typ' at get typ args : " + (get_typ_con t) + " " + (Print.typ_to_string t))
 
 let rec get_tbinders_from_typ (t:typ) =
     match t.n with
@@ -314,13 +318,16 @@ let rec get_tbinders_from_typ (t:typ) =
         let has_poly = List.fold (fun b x -> match x with | Some _ -> true | _ -> b) false args in
         if has_poly then args
         else []
-    | _ -> failwith ("Unexpected typ' : " + (get_typ_con t))
+    | Typ_app(ty, args) -> 
+        // TODO : FIXME !
+        []
+    | _ -> failwith ("Unexpected typ' at get tbinders : " + (get_typ_con t) + " " + (Print.typ_to_string t))
 
 let lid_typs_from_datacon (f:sigelt) =
     match f with
     | Sig_datacon(lid, t, tc, quals, lids, r) ->
         let typ_args = get_typ_args_from_typ t in
-        if List.isEmpty typ_args then Printf.printf "Polymorphic datacon should have typ vars"
+        if List.isEmpty typ_args then () (* Printf.printf "Polymorphic datacon should have typ vars" *)
         else ();
         (lid, typ_args)
     | _ -> failwith "Expected datacon"
@@ -596,14 +603,18 @@ and substitute_exp subst e =
         let lid = fv.v in
         let ty = fv.sort in
         let typ_args = filter (List.map (fun x -> match fst x with | Inl t -> Some t | _ -> None) args) in
-        Printf.printf "Types : %s\n" (List.fold (fun s x -> s + " " + (Print.typ_to_string x)) "" typ_args);
+
+//        Printf.printf "Types : %s\n" (List.fold (fun s x -> s + " " + (Print.typ_to_string x)) "" typ_args);
+
         let norm_typ_args = List.map (FStar.Tc.Normalize.normalize PrettyPrint.empty_env) typ_args in
-        Printf.printf "Norms : %s\n" (List.fold (fun s x -> s + " " + (Print.typ_to_string x)) "" norm_typ_args);
-        Printf.printf "Bla : %s\n" (List.fold (fun s x -> s + " " + (Print.tag_of_typ x)) "" norm_typ_args);
-        Printf.printf "Substitution :\n"; 
-        List.iter   (fun s ->   let v,t = match s with | Inl(v,t) -> v,t | _ -> failwith "" in
-                                Printf.printf "%s ~> %s\n" v.ppname.idText (Print.typ_to_string t))
-                    subst;
+
+//        Printf.printf "Norms : %s\n" (List.fold (fun s x -> s + " " + (Print.typ_to_string x)) "" norm_typ_args);
+//        Printf.printf "Bla : %s\n" (List.fold (fun s x -> s + " " + (Print.tag_of_typ x)) "" norm_typ_args);
+//        Printf.printf "Substitution :\n"; 
+//        List.iter   (fun s ->   let v,t = match s with | Inl(v,t) -> v,t | _ -> failwith "" in
+//                                Printf.printf "%s ~> %s\n" v.ppname.idText (Print.typ_to_string t))
+//                    subst;
+
         let subs_ty ty (subst:subst) = 
             match ty.n with
             | Typ_btvar(btv) -> 
@@ -658,8 +669,11 @@ let rec mk_new_sigelt (env:FStar.Tc.Env.env) (context:context) (old_sigelt:sigel
         (* let new_typs = mk_new_typ typ old_typs new_typs in *)
         //let old_typs = List.map (fun x -> (Inl x, Some Equality)) (filter old_typs) in
         let new_typs = filter typs in
-        let new_typs = List.map2 (fun x y -> (Inl x, snd y)) (filter typs) old_typs in
-        let subst = if is_poly then subst_of_list old_typs new_typs else [] in
+        
+        let subst = if is_poly && List.length new_typs = List.length old_typs then 
+            let new_typs = List.map2 (fun x y -> (Inl x, snd y)) (filter typs) old_typs in
+            subst_of_list old_typs new_typs 
+        else (print_string "\nWARNING : polymorphic call remaining, skipping substitution for it\n"; []) in
 
         // Print substitution for debugging
 //        print_string "\nBinders to be substituted with : \n";
@@ -723,7 +737,7 @@ let transform fmods (env:FStar.Tc.Env.env) =
     
     // Collect polymorphic types, datacons and functions information
     let context = List.fold (process_poly env) (empty_context()) fmods in
-
+//
 //    print_string "\nPolymorphic types : \n";
 //    List.iter (fun x -> Printf.printf "%s\n" (Print.sigelt_to_string x)) context.poly_types;
 //    print_string "\nPolymorphic datacon : \n";
@@ -832,9 +846,12 @@ let transform fmods (env:FStar.Tc.Env.env) =
             end
         | _ -> [] in
 
-    let mono_sigelt_2 env context sigelt calls = List.fold (fun l x -> (mono_sigelt_1 env context sigelt x)@l) [] (Map.toList all_calls) in
+    let mono_sigelt_2 env context sigelt calls = 
+        print_string ">mono_sigelt_2 \n";
+        List.fold (fun l x -> (mono_sigelt_1 env context sigelt x)@l) [] (Map.toList all_calls) in
 
     let mono_decl env context decl = 
+        print_string ">mono_decl \n";
         List.fold 
         (fun l x -> 
             match x with
