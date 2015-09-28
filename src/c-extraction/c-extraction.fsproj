@@ -44,10 +44,12 @@
     <Reference Include="System.Numerics" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="util.fs" />
     <Compile Include="pretty_print.fs" />
     <Compile Include="c-syntax.fs" />
     <Compile Include="c-extracttyp.fs" />
     <Compile Include="c-extractmod.fs" />
+    <Compile Include="erase.fs" />
     <Compile Include="transform.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -492,7 +492,13 @@ let rec sigelt_to_string_short x = match x with
 let rec modul_to_string (m:modul) =
   Util.format2 "module %s\n%s" (sli m.name) (List.map sigelt_to_string m.declarations |> String.concat "\n")
 
-(**********  *********)
+
+(************* Debugging pretty printings ***************)
+let btvar_to_string btv =
+    btv.v.ppname
+
+
+(********** C pretty printing *********)
 let empty_env:FStar.Tc.Env.env =
     let solver = FStar.ToSMT.Encode.dummy in
     FStar.Tc.Env.initial_env solver Const.prims_lid
@@ -502,8 +508,11 @@ let env:FStar.Tc.Env.env ref =
     let env = FStar.Tc.Env.initial_env solver Const.prims_lid in
     ref env
 
+// Automatically loaded modules, ignore as first apporximation
+let default_modules = ["Prims"; "FStar.Set"; "FStar.Heap"; "FStar.ST"; "FStar.All"]
+
 // Useful regular expressions
-let refinement_regex = new System.Text.RegularExpressions.Regex "([\(\w_]+)\:([\w_\s\(\)\.]+)\{([\w\s\(\)_.]+)\}"
+let refinement_regex = new System.Text.RegularExpressions.Regex "([\(\w_]+)\:([\w_\s\(\)\.]+)\{([\w\s\(\)_.<>%\*\+]+)\}"
 let tuple2_regex = new System.Text.RegularExpressions.Regex "\(Tuple2[\s]+([\w_]+\**)[\s]+([\w_]+\**)\)"
 let ptr_regex = new System.Text.RegularExpressions.Regex "\(ptr ([\w_.]+)\)"
 let paren_regex_1 = new System.Text.RegularExpressions.Regex "[\(]+([\w_.\s]+)[\)]+"

@@ -20,20 +20,12 @@ open FStar.Util
 open FStar.Absyn
 open FStar.Absyn.Syntax
 
-(*This approach assumes that failwith already exists in scope. This might be problematic, see below.*)
-let fail_exp (lid:lident) (t:typ) = mk_Exp_app(Util.fvar None Const.failwith_lid dummyRange,
-                          [ targ t
-                          ; varg <| mk_Exp_constant (Const_string (Bytes.string_as_unicode_bytes ("Not yet implemented:"^(Print.sli lid)), dummyRange)) None dummyRange]) None dummyRange
-
-let mangle_projector_lid (x: lident) : lident =
-    let projecteeName = x.ident in
-    let prefix, constrName = Util.prefix x.ns in
-    let mangledName = Syntax.id_of_text ("___"^constrName.idText^"___"^projecteeName.idText) in
-    lid_of_ids (prefix@[mangledName])
-
 let rec extract_sig (* (g:env) *) (se:sigelt) : string (* env * list<mlmodule1> *) =
-//   (debug g (fun u -> Util.print_string (Util.format1 "now extracting :  %s \n" (Print.sigelt_to_string se))));
-    let se = FStar.Tc.Normalize.norm_sigelt !PrettyPrint.env se in
+
+    let se = try FStar.Tc.Normalize.norm_sigelt !PrettyPrint.env se 
+            with | ex -> 
+                    Printf.printf "BACKEND WARNING : Caught the following exception when normalizing : %s" (ex.ToString());
+                    se in
      match se with
         | Sig_datacon _
         | Sig_bundle _
@@ -73,26 +65,20 @@ let rec extract_sig (* (g:env) *) (se:sigelt) : string (* env * list<mlmodule1> 
 
 
 let rec extract (* (g:env) *) (m:modul) : list<lident * string> (* env * list<mllib> *) =
-    // Set the environment for the pretty printer
-    //PrettyPrint.env := g.tcenv;
 
     Util.reset_gensym();
 
     let name = m.name.str in
     Printf.printf "\nEntering module : %s\n" m.name.str;
 
-    if m.name.str = "Prims" 
+    if List.contains m.name.str PrettyPrint.default_modules
     || m.is_interface
     || List.contains m.name.str !Options.admit_fsi
-    || m.name.str.Substring(0,2) <> "C_"
     then 
         []
 
     else 
         [m.name, List.fold (fun s x -> s + extract_sig x) "" m.declarations]
-//        let g, sigs = Util.fold_map extract_sig g m.declarations in
-//         let mlm : mlmodule = List.flatten sigs in
-//         g, [MLLib ([Util.flatten_mlpath name, Some ([], mlm), (MLLib [])])]
 
 let format (m:lident * string) =
     let id = fst m in

@@ -82,6 +82,27 @@ let global_test x y =
   let res = y in
   res
 
+(*
 let rec double x = 2 * x
 and triple x = 3 * x
 and lalala x = x
+*)
+
+val trivial_lemma: 
+  x:int -> y:int -> 
+  Lemma
+    (requires (x >= 0 /\ y >= 0))
+    (ensures (x + y >= 0))
+let trivial_lemma x y = ()
+
+val do_nothing: int -> int -> Tot unit
+let do_nothing x y =
+  let a = x in
+  let b = y in
+  let c = a + b in
+  let res = () in
+  res
+
+
+val double_gtot: int -> GTot int
+let double_gtot x = 2 * x

@@ -1,7 +1,7 @@
 (*--build-config
-    options:--admit_fsi FStar.Set --admit_fsi FStar.Seq --verify_module Demo --z3timeout 30 --codegen OCaml;
+    options:--verify_module Demo --z3timeout 10;
     variables:PLATFORM=../../contrib/Platform/fst SST=../low-level;
-  other-files:classical.fst ext.fst set.fsi seq.fsi heap.fst st.fst all.fst seqproperties.fst list.fst listTot.fst listproperties.fst $SST/stack.fst $SST/listset.fst ghost.fst $SST/located.fst $SST/lref.fst $SST/stackAndHeap.fst $SST/sst.fst $SST/sstCombinators.fst  $SST/array.fsi $SST/array.fst buffer.fst system.fst;
+  other-files:classical.fst ext.fst set.fsi set.fst seq.fsi seq.fst heap.fst st.fst all.fst seqproperties.fst list.fst listTot.fst listproperties.fst $SST/stack.fst $SST/listset.fst ghost.fst $SST/located.fst $SST/lref.fst $SST/stackAndHeap.fst $SST/sst.fst $SST/sstCombinators.fst  $SST/array.fsi $SST/array.fst buffer.fst system.fst;
   --*)
 
 module Demo

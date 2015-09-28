@@ -75,33 +75,10 @@ let contains_typ binders =
 let contains_lid (lid:lident) (li:lident list) : bool =
     List.fold (fun b id -> b || lid_equals lid id) false li 
 
-let get_typ_con typ = 
-    match typ.n with
-    | Typ_btvar _ -> "btvar"
-    | Typ_const _ -> "const"
-    | Typ_fun _ -> "fun"
-    | Typ_refine _ -> "refine"
-    | Typ_app _ -> "app"
-    | Typ_lam _ -> "lam"
-    | Typ_ascribed _ -> "ascribed"
-    | Typ_meta _ -> "meta"
-    | Typ_uvar _ -> "uvar"
-    | Typ_delayed _ -> "delayed"
-    | Typ_unknown -> "unknown"
+// 
+let get_typ_con typ = Print.tag_of_typ typ
 
-let get_exp_con exp =
-    match exp.n with
-    | Exp_bvar _ -> "bvar"
-    | Exp_fvar _ -> "fvar"
-    | Exp_constant _ -> "constant"
-    | Exp_abs _ -> "abs"
-    | Exp_app _ -> "app"
-    | Exp_match _ -> "match"
-    | Exp_ascribed _ -> "ascribed"
-    | Exp_let _ -> "let"
-    | Exp_uvar _ -> "uvar"
-    | Exp_delayed _ -> "delayed"
-    | Exp_meta _ -> "meta"
+let get_exp_con exp = Print.tag_of_exp exp
 
 let arg_is_typ arg =
     match fst arg with | Inl _ -> true | _ -> false
@@ -163,18 +140,25 @@ and find_call_in_exp env context exp : context =
     match exp.n with
     | Exp_abs(binders, e) -> find_call_in_exp env context e
     | Exp_app(e, args) -> 
-        let fv, qual = match e.n with | Exp_fvar(fv, qual) -> fv, qual | _ -> failwith "expected fvar exp" in
-        let lid = fv.v in
-        let t = fv.sort in
-        let is_datacon = match qual with | Some Data_ctor -> true | _ -> false in
+        begin
+            match e.n with
+            | Exp_bvar(bv) ->
+                let ty = bv.sort in
+                find_call_in_typ env context ty
+            | Exp_fvar(fv, qual) ->
+                let lid = fv.v in
+                let t = fv.sort in
+                let is_datacon = match qual with | Some Data_ctor -> true | _ -> false in
         
-        let typ_args = List.map (fun x -> match fst x with | Inl t -> Some t | _ -> None) args in
-        let has_typ_args = List.fold (fun b x -> match x with | Some _ -> true | _ -> b) false typ_args in
-        let context = if has_typ_args then add_call_to_context context lid typ_args
-        else context in
+                let typ_args = List.map (fun x -> match fst x with | Inl t -> Some t | _ -> None) args in
+                let has_typ_args = List.fold (fun b x -> match x with | Some _ -> true | _ -> b) false typ_args in
+                let context = if has_typ_args then add_call_to_context context lid typ_args
+                else context in
             
-        let context = find_call_in_exp env context e in
-        List.fold (find_call_in_arg env) context args
+                let context = find_call_in_exp env context e in
+                List.fold (find_call_in_arg env) context args
+            | _ -> failwith (Util.format2 "expected a Exp_bvar or Exp_fvar, got %s as %s" (Print.tag_of_exp e) (Print.exp_to_string e))
+        end
     | Exp_match(e, li) ->
         let context = find_call_in_exp env context e in
         let exp_list = List.map (fun (_,_,x) -> x) li in
@@ -273,7 +257,7 @@ let rec process_poly' env context sigelt =
     | Sig_pragma _ -> context
 
 let process_poly (env:FStar.Tc.Env.env) (context:context) m =
-    if m.name.str = "Prims" then context else
+//    if m.name.str = "Prims" then context else
     List.fold (process_poly' env) context m.declarations
 
 let mk_new_fun_lid (lid:lident) (typs:list<lident>) : string = "Not implemented yet\n"
@@ -341,6 +325,10 @@ let rec eq_typ_args (a1:list<option<typ>>) (a2:list<option<typ>>) =
     | _ -> false
 
 let subst_with_new_types caller_binders (caller_types:list<option<typ>>) current_types =
+
+    if List.length caller_binders <> List.length caller_types then
+        Printf.printf "orig : %s\n" (List.fold (fun s x -> match x with | Some y -> s + (Print.typ_to_string y) + " " | None -> s +  "_ ") "" current_types);
+
     let subst = List.fold2 (fun m x y -> match x with | Some x -> Map.add (x.v.ppname.idText) y m | None -> m) 
                            Map.empty
                            caller_binders
@@ -362,17 +350,31 @@ let subst_with_new_types caller_binders (caller_types:list<option<typ>>) current
 let process_new_call context (lid:lident) (calls:list<list<option<typ>>>) =
     let poly_funs = context.poly_funs in
     let poly_datacons = List.map lid_typs_from_datacon context.poly_datacon in
-    let binders =   match List.find (fun x -> lid_equals lid (fst x)) (List.append poly_funs poly_datacons) with
-                    | Some bds -> bds | None -> failwith "Could not find this polymorphic function or datacon" in
-    let data = Map.toList context.data in
-    let callees = match List.tryFind (fun x -> lid_equals lid (fst x)) data with | Some c -> snd c | _ -> Map.empty in
+    match List.find (fun x -> lid_equals lid (fst x)) (List.append poly_funs poly_datacons) with
+    | None -> 
+        Printf.printf "BACKEND WARNING : %s \n" (Util.format1 "Could not find this polymorphic function or datacon : %s" lid.str);
+        []                  
+    | Some binders ->  
+        let data = Map.toList context.data in
+        let callees = match List.tryFind (fun x -> lid_equals lid (fst x)) data with | Some c -> snd c | _ -> Map.empty in
 
-    let callees = Map.toList callees in
-    let subst_typ_in_callee_1 ctyp (callee:list<list<option<typ>>>) = List.map (fun x -> subst_with_new_types (snd binders) ctyp x) callee in
-    let subst_typ_in_callee_2 ctyps (callee:list<list<option<typ>>>) = List.fold (fun l x -> (subst_typ_in_callee_1 x callee)@l) [] calls in
-    let l = List.fold (fun l x -> (fst x, subst_typ_in_callee_2 calls (snd x))::l) [] callees in
+        let callees = Map.toList callees in
+        
+        let subst_typ_in_callee_1 ctyp (callee:list<list<option<typ>>>) = 
+            let binders = 
+                // TODO : fixme, this hack should not be necessary and is still unsafe
+                if List.length (snd binders) <> List.length ctyp 
+                then fst binders, List.fold (fun l x -> match x with | Some y -> l@[x] | _ -> l) [] (snd binders) 
+                else binders in
+//                Printf.printf "Lid : %s\nBinders : %s\nTypes : %s\n" 
+//                              (lid.str) 
+//                              (List.fold (fun s x -> s + " " + (match x with | Some y -> y.v.ppname.idText | _ -> "_")) "" (snd binders))
+//                              (List.fold (fun s x -> match x with | Some y -> s + " " + (Print.typ_to_string y) | _ -> s + " _") "" ctyp);
+            List.map (fun x -> subst_with_new_types (snd binders) ctyp x) callee in
+        let subst_typ_in_callee_2 ctyps (callee:list<list<option<typ>>>) = List.fold (fun l x -> (subst_typ_in_callee_1 x callee)@l) [] calls in
+        let l = List.fold (fun l x -> (fst x, subst_typ_in_callee_2 calls (snd x))::l) [] callees in
 
-    l
+        l
 
 let process_new_calls context new_calls =
     let current_calls = Map.toList new_calls in
@@ -483,32 +485,40 @@ let rec substitute_typ (subst:subst) typ =
     match typ.n with
     | Typ_btvar(btvar) -> 
         begin
+            print_string "btvar\n";
             let s = Util.find_map subst (function Inl (b, t) when (eq_bvd btvar.v b) -> Some t | _ -> None) in
             match s with
             | Some t -> 
                 begin
-//                    Printf.printf "Did a substitution : %s ~> %s\n" btvar.v.ppname.idText (Print.typ_to_string t);
-                    substitute_typ subst t
+                    match t.n with
+                    | Typ_btvar(btvar2) when btvar2.v.realname.idText = btvar.v.realname.idText -> typ
+                    | _ ->
+                        Printf.printf "Did a substitution : %s ~> %s\n" btvar.v.ppname.idText (Print.typ_to_string t);
+                        substitute_typ subst t
                 end
             | _ -> typ
         end
     | Typ_fun(bds, c) ->
         begin
+            print_string "fun\n";
             let new_bds = List.map (substitute_binder subst) bds in
             let new_bds = filter new_bds in
             let new_comp = substitute_comp subst c in
             { typ with n = Typ_fun(new_bds, new_comp) } 
         end
     | Typ_refine(bv, t) -> 
+        print_string "refine\n";
         let new_t = substitute_typ subst t in
         let new_bv = { bv with sort = substitute_typ subst bv.sort} in
         { typ with n = Typ_refine(new_bv, new_t) }
     | Typ_app(t, args) -> 
+        print_string "app\n";
         let new_t = substitute_typ subst t in
         let new_args = List.map (substitute_arg subst) args in
         { typ with n = Typ_app(new_t, new_args) }
     | Typ_lam(bds, t) -> 
         begin
+            print_string "lam\n";
             let new_bds = List.map (substitute_binder subst) bds in
             let new_bds = filter new_bds in
             { typ with n = Typ_lam(new_bds, substitute_typ subst t) }
@@ -516,6 +526,7 @@ let rec substitute_typ (subst:subst) typ =
     | Typ_ascribed (t, knd) -> { typ with n = Typ_ascribed(substitute_typ subst t, knd) }
     | Typ_meta(meta) ->
         begin
+            print_string "meta\n";
             let new_meta = match meta with
             | Meta_pattern(t, args) -> Meta_pattern(substitute_typ subst t, List.map (substitute_arg subst) args)
             | Meta_named(t, lident) -> Meta_named(substitute_typ subst t, lident)
@@ -526,6 +537,7 @@ let rec substitute_typ (subst:subst) typ =
         end
     | Typ_delayed(e, m) -> 
         begin
+            print_string "delayed\n";
             match e with
             | Inl(t, subst_t) -> let t' = compress_typ t in substitute_typ subst t'
             | Inr(mk_t) -> 
@@ -584,7 +596,7 @@ and substitute_exp subst e =
         let new_e = substitute_exp subst e' in
         { e with n = Exp_abs(new_bds, new_e)}
     | Exp_app(e', args) ->
-        
+        begin
 //        let lid = fv.v in
 //        let ty = fv.sort in
 //        let ty_binders = filter (get_tbinders_from_typ ty) in
@@ -599,39 +611,44 @@ and substitute_exp subst e =
 //        
 //        let new_typ = substitute_typ subst ty in
 //        { e with n = Exp_fvar({fv with sort = new_typ; v = new_lid}, qual)}
-        let fv, qual = match e'.n with | Exp_fvar(f, q) -> f, q | _ -> failwith "impossible" in
-        let lid = fv.v in
-        let ty = fv.sort in
-        let typ_args = filter (List.map (fun x -> match fst x with | Inl t -> Some t | _ -> None) args) in
+        match e'.n with
+        | Exp_fvar(f, q) -> 
+            let fv, qual = f, q in
+            let lid = fv.v in
+            let ty = fv.sort in
+            let typ_args = filter (List.map (fun x -> match fst x with | Inl t -> Some t | _ -> None) args) in
 
-//        Printf.printf "Types : %s\n" (List.fold (fun s x -> s + " " + (Print.typ_to_string x)) "" typ_args);
+    //        Printf.printf "Types : %s\n" (List.fold (fun s x -> s + " " + (Print.typ_to_string x)) "" typ_args);
 
-        let norm_typ_args = List.map (FStar.Tc.Normalize.normalize PrettyPrint.empty_env) typ_args in
+            let norm_typ_args = List.map (FStar.Tc.Normalize.normalize PrettyPrint.empty_env) typ_args in
 
-//        Printf.printf "Norms : %s\n" (List.fold (fun s x -> s + " " + (Print.typ_to_string x)) "" norm_typ_args);
-//        Printf.printf "Bla : %s\n" (List.fold (fun s x -> s + " " + (Print.tag_of_typ x)) "" norm_typ_args);
-//        Printf.printf "Substitution :\n"; 
-//        List.iter   (fun s ->   let v,t = match s with | Inl(v,t) -> v,t | _ -> failwith "" in
-//                                Printf.printf "%s ~> %s\n" v.ppname.idText (Print.typ_to_string t))
-//                    subst;
+    //        Printf.printf "Norms : %s\n" (List.fold (fun s x -> s + " " + (Print.typ_to_string x)) "" norm_typ_args);
+    //        Printf.printf "Bla : %s\n" (List.fold (fun s x -> s + " " + (Print.tag_of_typ x)) "" norm_typ_args);
+    //        Printf.printf "Substitution :\n"; 
+    //        List.iter   (fun s ->   let v,t = match s with | Inl(v,t) -> v,t | _ -> failwith "" in
+    //                                Printf.printf "%s ~> %s\n" v.ppname.idText (Print.typ_to_string t))
+    //                    subst;
 
-        let subs_ty ty (subst:subst) = 
-            match ty.n with
-            | Typ_btvar(btv) -> 
-                let v = List.tryFind (fun x -> eq_bvd (fst x) btv.v) (List.map (fun x -> match x with | Inl v -> v | _ -> failwith "impossible") subst) in
-                ( match v with 
-                | Some (v,t) -> Some t
-                | None -> None )
-            | Typ_const(c) -> Some ty
-            | _ -> None in
-        let new_typs = List.map (fun x -> subs_ty x subst) norm_typ_args in
-        let new_lid = mk_new_lid lid new_typs in
-        Printf.printf "New id : %s\n" (Print.sli new_lid);
-        let new_e' = substitute_exp subst e' in
-        let new_e' = { new_e' with n = Exp_fvar({ fv with v = new_lid }, qual) } in
-        let new_args = List.map (substitute_arg subst) args in
+            let subs_ty ty (subst:subst) = 
+                match ty.n with
+                | Typ_btvar(btv) -> 
+                    let v = List.tryFind (fun x -> eq_bvd (fst x) btv.v) (List.map (fun x -> match x with | Inl v -> v | _ -> failwith "impossible2") subst) in
+                    ( match v with 
+                    | Some (v,t) -> Some t
+                    | None -> None )
+                | Typ_const(c) -> Some ty
+                | _ -> None in
+            let new_typs = List.map (fun x -> subs_ty x subst) norm_typ_args in
+            let new_lid = mk_new_lid lid new_typs in
+    //        Printf.printf "New id : %s\n" (Print.sli new_lid);
+            let new_e' = substitute_exp subst e' in
+            let new_e' = { new_e' with n = Exp_fvar({ fv with v = new_lid }, qual) } in
+            let new_args = List.map (substitute_arg subst) args in
 
-        { e with n = Exp_app(new_e', new_args) }
+            { e with n = Exp_app(new_e', new_args) }
+        | Exp_bvar(bv) -> { e with n = Exp_app(e', args)}
+        | _ -> failwith (Util.format1 "impossible1 : %s" (Print.tag_of_exp e'))
+        end
     | Exp_match(e', li) ->
         { e with n = Exp_match(substitute_exp subst e', li) }
     | Exp_ascribed(e', t', li) ->
@@ -653,15 +670,42 @@ and substitute_exp subst e =
     | Exp_meta(Meta_desugared(e', msi)) -> 
         { e with n = Exp_meta(Meta_desugared(substitute_exp subst e', msi))}
 
-and substitute_lb (subst:subst) (lb:letbinding) = { lb with lbtyp = substitute_typ subst lb.lbtyp; lbdef = substitute_exp subst lb.lbdef }
+and substitute_lb (subst:subst) (lb:letbinding) = 
+    let new_lbtyp = substitute_typ subst lb.lbtyp in
+    let new_lbdef = substitute_exp subst lb.lbdef in
+    { lb with lbtyp = new_lbtyp; lbdef = new_lbdef }
+
+//let rec is_fully_applied typ =
+//    match typ.n with
+//    | Typ_btvar(btv) -> Some btv
+//    | Typ_const _ -> None
+//    | Typ_fun _ -> None
+//    | Typ_refine _ -> None
+//    | Typ_app _ -> None
+//    | Typ_lam _ -> None
+//    | Typ_ascribed _ -> None
+//    | Typ_meta _ -> None
+//    | Typ_uvar _ -> None
+//    | Typ_delayed _ -> None
+//    | _ -> None
+
+let clean_subst (subst:subst) : subst =
+//    let check_for_btvar_loop binder typ =
+//        match typ.n with
+//        | Typ_btvar(btv) -> if btv.v.realname.idText = binder.realname.idText then true
+//                            else false
+//        | _ -> false in
+    List.fold (fun l s -> match s with | Inl(b, t) -> if is_fully_applied t then l@[s] else l | _ -> l@[s]) [] subst
 
 let rec mk_new_sigelt (env:FStar.Tc.Env.env) (context:context) (old_sigelt:sigelt) (typs:list<option<typ>>) =
     match old_sigelt with
     | Sig_bundle(sigelts, quals, lids, r) ->
+        print_string "mk_new_sigelt bundle\n";
         let new_sigelts = List.map (fun x -> mk_new_sigelt env context x typs) sigelts in
         let new_lids = List.map get_sigelt_lid new_sigelts in
         Sig_bundle(new_sigelts, quals, new_lids, r)
     | Sig_datacon(lid, typ, tycon, quals, lids, r) ->
+        print_string "mk_new_sigelt datacon\n";
         let is_poly = List.exists (fun x -> (get_sigelt_lid x).str = lid.str) context.poly_datacon in
 
         let new_lid = mk_new_lid lid typs in
@@ -674,6 +718,9 @@ let rec mk_new_sigelt (env:FStar.Tc.Env.env) (context:context) (old_sigelt:sigel
             let new_typs = List.map2 (fun x y -> (Inl x, snd y)) (filter typs) old_typs in
             subst_of_list old_typs new_typs 
         else (print_string "\nWARNING : polymorphic call remaining, skipping substitution for it\n"; []) in
+        
+        // Remove loops ~> TODO : fixme, loops should not be introduced 
+        let subst = clean_subst subst in
 
         // Print substitution for debugging
 //        print_string "\nBinders to be substituted with : \n";
@@ -693,6 +740,7 @@ let rec mk_new_sigelt (env:FStar.Tc.Env.env) (context:context) (old_sigelt:sigel
         let s = Sig_datacon(new_lid, new_typ, new_tycon, quals, lids, r) in
         s
     | Sig_let(lbs, r, lids, quals) -> 
+        print_string "mk_new_sigelt let\n";
         let subst_lb (lb:letbinding) = 
             let lid, t, e = lb.lbname, lb.lbtyp, lb.lbdef in
             let lid = match lid with | Inr id -> id | Inl _ -> failwith "Unexpected bvvdef" in
@@ -706,20 +754,23 @@ let rec mk_new_sigelt (env:FStar.Tc.Env.env) (context:context) (old_sigelt:sigel
                 let subst = if List.length old_typs = List.length new_typs then subst_of_list old_typs new_typs
                             else (print_string "\nWARNING : polymorphic call remaining, skipping substitution for it\n"; []) in
                 
+                // Remove loops ~> TODO : fixme, loops should not be introduced 
+                let subst = clean_subst subst in
+
                 // Print substitution for debugging
 //                print_string "\nBinders to be substituted with : \n";
 //                let print_subst_elt se = match se with | Inl(bt, t) -> bt.ppname.idText + "/" + bt.realname.idText + " ~> " + (Print.typ_to_string t) + " " + (tag_of_typ t)| _ -> "" in
 //                let print_subst_list sl = List.fold (fun s x -> s + print_subst_elt x + "\n") "" sl in
 //                print_string (print_subst_list subst);
 //                print_string ">\n";
-
+                print_string "before typ\n";
                 let new_typ = substitute_typ subst t in                
-
+                print_string "after_typ\n";
 //                Printf.printf "old type : %s \n" (Print.typ_to_string t);
 //                Printf.printf "new type : %s \n" (Print.typ_to_string new_typ);
 
                 let new_exp = substitute_exp subst e in
-
+                print_string "after_exp\n";
 //                Printf.printf "old exp : %s \n" (Print.exp_to_string e);
 //                Printf.printf "new exp : %s \n" (Print.exp_to_string new_exp);
 
@@ -729,40 +780,52 @@ let rec mk_new_sigelt (env:FStar.Tc.Env.env) (context:context) (old_sigelt:sigel
             in
         let new_lbs = (fst lbs, List.map subst_lb (snd lbs)) in
         Sig_let(new_lbs, r, lids, quals)
-    | _ -> old_sigelt
+    | _ -> 
+        print_string "mk_new_sigelt other\n";
+        old_sigelt
 
 // F* ~> Low* transformation
-let transform fmods (env:FStar.Tc.Env.env) = 
-    //List.iter (fun m -> Printf.printf "Module \n\n %s" (Print.modul_to_string m)) fmods;
-    
+let transform (fmods:list<modul>) (env:FStar.Tc.Env.env) = 
+//    List.iter (fun m -> Printf.printf "Module :%s\n" (m.name.str)) fmods;
+
+    // Simple pre-erasure
+    let erasure_context = Erasure.mk_erasure_context () in
+    let erasure_context, fmods = Util.fold_map Erasure.erase_declarations erasure_context fmods in
+
+    // Normalize the modules to reduce the already known types
+    let normalize_fmod = fun env m -> { m with declarations = List.map (FStar.Tc.Normalize.norm_sigelt env) m.declarations } in 
+    let fmods = List.map (normalize_fmod env) fmods in
+
     // Collect polymorphic types, datacons and functions information
     let context = List.fold (process_poly env) (empty_context()) fmods in
-//
-//    print_string "\nPolymorphic types : \n";
-//    List.iter (fun x -> Printf.printf "%s\n" (Print.sigelt_to_string x)) context.poly_types;
-//    print_string "\nPolymorphic datacon : \n";
-//    List.iter (fun x -> Printf.printf "%s\n" (Print.sigelt_to_string x)) context.poly_datacon;
-//    print_string "\nPolymorphic functions : \n";
-//    List.iter (fun x -> Printf.printf "%s\n " (fst x).str) context.poly_funs;
-//    print_string "\nNew functions and datacons to create : \n";
-//    let data = context.data in
-//    let data = Map.toList data in
-//    for caller in data do
-//        Printf.printf "For caller %s the following callees : \n" (Print.sli (fst caller));
-//        let caller = Map.toList (snd caller) in
-//        for callee in caller do
-//            Printf.printf "\tcallee %s with types : \n" (Print.sli (fst callee));
-//            for typ in snd callee do
-//                let str = List.fold (fun s t -> match t with | Some t' -> s + "_" + (Print.typ_to_string t') | _ -> s) 
-//                                    (Print.sli (fst callee))
-//                                    typ in
-//                Printf.printf "\t\t%s\n" str;
-//            done;
-//        done;
-//    done;
 
+    print_string "\nPolymorphic types : \n";
+    List.iter (fun x -> Printf.printf "%s\n" (Print.sigelt_to_string x)) context.poly_types;
+    print_string "\nPolymorphic datacon : \n";
+    List.iter (fun x -> Printf.printf "%s\n" (Print.sigelt_to_string x)) context.poly_datacon;
+    print_string "\nPolymorphic functions : \n";
+    List.iter (fun x -> Printf.printf "%s\n " (fst x).str) context.poly_funs;
+    print_string "\nNew functions and datacons to create : \n";
+    let data = context.data in
+    let data = Map.toList data in
+    for caller in data do
+        Printf.printf "For caller %s the following callees : \n" (Print.sli (fst caller));
+        let caller = Map.toList (snd caller) in
+        for callee in caller do
+            Printf.printf "\tcallee %s with types : \n" (Print.sli (fst callee));
+            for typ in snd callee do
+                let str = List.fold (fun s t -> match t with | Some t' -> s + "_" + (Print.typ_to_string t') | _ -> s) 
+                                    (Print.sli (fst callee))
+                                    typ in
+                Printf.printf "\t\t%s\n" str;
+            done;
+        done;
+    done;
+
+    // Compute necessary specialized functions
     let all_calls = process_calls context in
 
+    // Print debug information about found call sites and needed specialized functions and datacons 
     print_string "All calls : \n" ;
     for caller in Map.toList all_calls do
         Printf.printf "For function : %s the following types : \n" (fst caller).str;
@@ -773,9 +836,9 @@ let transform fmods (env:FStar.Tc.Env.env) =
     done;
     print_string "\n";
 
-    let ctrans_mod = match List.find (fun x -> x.name.str.Contains "C_Trans") fmods with
-                    | Some k -> k | _ -> failwith "" in
-
+    // Debug information
+//    let ctrans_mod = match List.find (fun x -> x.name.str.Contains "C_Trans") fmods with
+//                    | Some k -> k | _ -> failwith "" in
 //    for call in Map.toList all_calls do
 //
 //        for sigelt in ctrans_mod.declarations do
@@ -816,6 +879,7 @@ let transform fmods (env:FStar.Tc.Env.env) =
 //        
 //    done;
 
+    // Create new sig element for a particular call site type
     let rec mono_sigelt_1 env context sigelt call =
         match sigelt with
         | Sig_bundle(sig_list, quals, lidents, r) ->
@@ -823,16 +887,6 @@ let transform fmods (env:FStar.Tc.Env.env) =
             if List.exists (fun x -> (fst call).str = x.str) datacon_lids then
             List.fold (fun l x -> (mk_new_sigelt env context sigelt x)::l) [] (snd call)
             else []
-
-//        | Sig_datacon _ ->  
-//            begin
-//                let datacon_id = get_sigelt_lid sigelt in
-//                if List.exists (fun x -> (get_sigelt_lid x).str = datacon_id.str) context.poly_datacon then
-//                    if datacon_id.str = (fst call).str then
-//                        List.fold (fun l x -> (mk_new_sigelt env context sigelt x)::l) [] (snd call)
-//                    else []
-//                else []
-//            end
 
         | Sig_let(lbs, r, lids, quals) -> 
             begin
@@ -846,27 +900,33 @@ let transform fmods (env:FStar.Tc.Env.env) =
             end
         | _ -> [] in
 
+    // Create all specialized occurences of a sigelt
     let mono_sigelt_2 env context sigelt calls = 
-        print_string ">mono_sigelt_2 \n";
+//        print_string ">mono_sigelt_2 \n";
         List.fold (fun l x -> (mono_sigelt_1 env context sigelt x)@l) [] (Map.toList all_calls) in
 
+    // Specializes sig elt
     let mono_decl env context decl = 
-        print_string ">mono_decl \n";
+//        print_string ">mono_decl \n";
         List.fold 
         (fun l x -> 
             match x with
             | Sig_bundle(sigelts, quals, lids, r) ->
+                print_string "Sigbun1\n";
                 let datacon_lids = List.map get_sigelt_lid sigelts in
                 let is_poly = List.fold (fun b x -> b || List.exists (fun y -> y.str = (fst x).str) datacon_lids) false (Map.toList all_calls) in
                 if is_poly then l@(mono_sigelt_2 env context x all_calls)
                 else l@[x]
 
-            | Sig_datacon _ -> let datacon_id = get_sigelt_lid x in
+            | Sig_datacon _ -> 
+                print_string "Sigdatacon1\n";
+                let datacon_id = get_sigelt_lid x in
                                if List.exists (fun x -> (get_sigelt_lid x).str = datacon_id.str) context.poly_datacon then
                                     l@(mono_sigelt_2 env context x all_calls)
                                 else l@[x]
             | Sig_let(lbs, r, lids, quals) ->
-                let b = List.fold (fun b x' -> let lid = match x'.lbname with | Inr a -> a | _ -> failwith "impossible" in
+                print_string "Siglet1\n";
+                let b = List.fold (fun b x' -> let lid = match x'.lbname with | Inr a -> a | _ -> failwith "impossible3" in
                                         if List.exists (fun y -> (fst y).str = lid.str) context.poly_funs then true
                                         else b) false (snd lbs) in
                 if b then l@(mono_sigelt_2 env context x all_calls) else l@[mk_new_sigelt env context x []]
@@ -874,16 +934,15 @@ let transform fmods (env:FStar.Tc.Env.env) =
         []
         decl in
 
-    let mods = List.map (fun m -> if m.name.str.Contains "C_"  then { m with declarations = mono_decl env context m.declarations} 
-                                                                else m) fmods in
+    // Filters out default modules and build new sig elt
+    let mods = List.map (fun m ->   if true (* not(List.contains m.name.str PrettyPrint.default_modules) *)
+                                    then { m with declarations = mono_decl env context m.declarations} 
+                                    else m) fmods in
 
     print_string "\n============================\n\n";
-    let normalized_mod m = { m with declarations = List.map (FStar.Tc.Normalize.norm_sigelt !PrettyPrint.env) m.declarations } in
-    List.iter (fun m -> if m.name.str.Contains "C_" then print_string (Print.modul_to_string (normalized_mod m)) else ()) mods;
 
-    //let (env', context'), siglets' = Util.fold_map find_replace_ptypes (env, context) fmods in
-    //print_string "New types to build : \n";
-    //List.iter (fun typ -> Printf.printf "%s\n" (Print.typ_to_string typ)) context'.new_types;
-    //let env', fmods' = Util.fold_map (transform_mod context) env fmods
+    // Debug information : TODO : fix fail on "Empty binders" due to type application in FStar.Seq : createEmpty 
+//    let normalized_mod m = { m with declarations = List.map (FStar.Tc.Normalize.norm_sigelt PrettyPrint.empty_env) m.declarations } in
+//    List.iter (fun m -> if m.name.str.Contains "C_" then print_string (Print.modul_to_string (normalized_mod m)) else ()) mods;
 
     mods, env
