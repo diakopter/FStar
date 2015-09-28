@@ -24,7 +24,7 @@ let rec extract_sig (* (g:env) *) (se:sigelt) : string (* env * list<mlmodule1> 
 
     let se = try FStar.Tc.Normalize.norm_sigelt !PrettyPrint.env se 
             with | ex -> 
-                    Printf.printf "BACKEND WARNING : Caught the following exception when normalizing : %s" (ex.ToString());
+                    Printf.printf "BACKEND WARNING :    Caught the following exception when normalizing : %s" (ex.ToString());
                     se in
      match se with
         | Sig_datacon _
