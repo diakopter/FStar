@@ -7,9 +7,9 @@ all: noninterference\
 		 smart_meter\
 		 spdz\
 		 cache\
-		 ifc_ts
-
-#		 ro\ ;;unstable
+		 ro\
+		 projection_test\
+		 ifc_compiler
 
 noninterference:
 	$(FSTAR) noninterference.fst
@@ -35,5 +35,8 @@ simple_st2_examples:
 cache:
 	$(FSTAR) cache.fst
 
-ifc_ts:
-	$(FSTAR) ifc_ts.fst
+ifc_compiler:
+	$(FSTAR) ifc_compiler.fst
+
+projection_test:
+	$(FSTAR) projection_test.fst

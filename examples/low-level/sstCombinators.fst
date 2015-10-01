@@ -3,9 +3,9 @@
     other-files:ext.fst set.fsi set.fst  heap.fst st.fst all.fst   list.fst stack.fst listset.fst ghost.fst located.fst lref.fst stackAndHeap.fst sst.fst
   --*)
 
-module SSTCombinators
+module RSTCombinators
 open StackAndHeap
-open SST
+open RST
 open Heap
 open Lref  open Located
 open Stack
@@ -16,26 +16,26 @@ open ListSet
 
 open Ghost
 
-(*Sane SST*)
+(*Sane RST*)
 
 
 (** withNewStackFrame combinator *)
 (*adding requires/ensures here causes the definition of scopedWhile below to not typecheck.
 Hope this is not a concert w.r.t. soundness*)
-effect WNSC (a:Type) (pre:(smem -> Type))  (post: (smem -> SSTPost a)) (mod:modset) =
+effect WNSC (a:Type) (pre:(smem -> Type))  (post: (smem -> RSTPost a)) (mod:modset) =
   Mem a
-      ( (*requires *) (fun m -> isNonEmpty (st m) /\ topstb m = emp /\ pre (mtail m)))
+      ( (*requires *) (fun m -> isNonEmpty (st m) /\ topRegion m = emp /\ pre (mtail m)))
       ( (* ensures *) (fun m0 a m1 -> post (mtail m0) a (mtail m1)))
       mod
 
-val withNewScope : #a:Type -> #pre:(smem -> Type) -> #post:(smem -> SSTPost a)
+val withNewScope : #a:Type -> #pre:(smem -> Type) -> #post:(smem -> RSTPost a)
   -> #mods:modset
   -> body:(unit -> WNSC a pre post mods)
       -> Mem a pre post mods
 let withNewScope 'a 'pre 'post #mods body =
-    pushStackFrame ();
+    pushRegion ();
     let v = body () in
-    popStackFrame (); v
+    popRegion (); v
 
 
 (*a combinator for writing while loops*)
@@ -65,8 +65,8 @@ let rec scopedWhile
    'loopInv 'wglc wg mods bd =
    if (wg ())
       then
-        ((let _ = pushStackFrame () in
-          let _ = bd  () in popStackFrame());
+        ((let _ = pushRegion () in
+          let _ = bd  () in popRegion());
          (scopedWhile 'loopInv 'wglc wg mods bd))
       else ()
 

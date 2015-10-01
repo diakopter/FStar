@@ -6,7 +6,7 @@
 (*perhaps this should be an interface file?*)
 
 module LallocTest
-open SST
+open RST
 open StackAndHeap
 open Located
 open Heap
@@ -28,8 +28,8 @@ let lx p =  (llift (fun (p:point)-> p.x)) p
 
 val lallocExample1 : px:int -> py:int -> PureMem int (fun m -> True) (fun m v -> v == px+1)
 let lallocExample1 px py =
-  pushStackFrame ();
+  pushRegion ();
   let sp= lalloc ({x=px ; y=py}) in
   let r = lx sp in
-  popStackFrame ();
+  popRegion ();
   (r+1)
