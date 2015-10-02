@@ -1,13 +1,19 @@
-(* --build-config
-    options:--admit_fsi FStar.Set --admit_fsi FStar.Seq --verify_module C_Trans;
-    variables:LIB=../../lib;
-  other-files:$LIB/classical.fst $LIB/ext.fst $LIB/set.fsi $LIB/seq.fsi $LIB/heap.fst $LIB/st.fst $LIB/all.fst $LIB/seqproperties.fst
+(*--build-config
+  options:--verify_module C_Trans --codegen C;
+  variables:SST=../low-level;
+  other-files:classical.fst ext.fst set.fsi set.fst seq.fsi seq.fst heap.fst st.fst all.fst  seqproperties.fst list.fst listTot.fst listproperties.fst $SST/stack.fst $SST/listset.fst ghost.fst $SST/located.fst $SST/lref.fst $SST/regions.fst $SST/rst.fst lsarray.fst
   --*)
 
 
 module C_Trans
 
-open FStar.Seq
+open RST
+open Located
+open Lref
+open FStar.Set
+open FStar.Ghost
+open Regions
+open Stack
 
 type ptr (a:Type) = | Ptr: v:a -> ptr a
 
@@ -21,8 +27,6 @@ type option (a:Type) =
   | None
   | Some : v:a -> option a
 
-(* Array with immutable length (check how to works out) *)
-//type array (a:Type) = | Array : l:nat -> c:ref (s:seq a{Seq.length s = l})  -> array a
 
 (* Test type, not polymorphic *)
 type t =
@@ -95,6 +99,8 @@ val trivial_lemma:
     (ensures (x + y >= 0))
 let trivial_lemma x y = ()
 
+
+// Computationally irrelevant, should be erased
 val do_nothing: int -> int -> Tot unit
 let do_nothing x y =
   let a = x in
@@ -103,6 +109,24 @@ let do_nothing x y =
   let res = () in
   res
 
-
+// GTot, should be erased
 val double_gtot: int -> GTot int
 let double_gtot x = 2 * x
+
+
+type opt_list (a:Type) = option (ref (_opt_list a))
+and _opt_list (a:Type) = | L: hd:a -> tl:opt_list a -> _opt_list a
+
+val array_test: 
+  int -> Mem int (requires (fun m -> isNonEmpty (st m))) (ensures (fun m0 _ m1 -> True)) (hide empty)
+let array_test x =
+  let zero = 0 in
+  let buffer = LSarray.create int 256 in
+  assert (LSarray.glength buffer = 256);
+  admit();
+  LSarray.upd buffer 32 0;
+  LSarray.upd buffer 33 1;
+  let v = LSarray.get buffer 32 in
+  let sub_buffer = LSarray.sub buffer 42 128 in
+  0
+  

@@ -107,7 +107,12 @@ let get_sigelt_lid s =
     match s with
     | Sig_tycon(lid, _, _, _, _, _, _) -> lid
     | Sig_datacon(lid, _, _, _, _, _) -> lid
-    | _ -> failwith ""
+    | Sig_typ_abbrev(lid, _, _, _, _, _) -> lid
+    | Sig_kind_abbrev(lid, _, _, _) -> lid
+    | Sig_val_decl(lid, _, _, _) -> lid
+    | Sig_assume(lid, _, _, _) -> lid
+    | Sig_effect_abbrev(lid, _, _, _, _) -> lid
+    | _ -> failwith (Util.format1 "Unhandled typ : %s" (PrettyPrint.tag_of_sigelt s))
 
 let rec find_call_in_typ env context typ : context = 
     match typ.n with
@@ -914,7 +919,9 @@ let transform (fmods:list<modul>) (env:FStar.Tc.Env.env) =
             | Sig_bundle(sigelts, quals, lids, r) ->
                 print_string "Sigbun1\n";
                 let datacon_lids = List.map get_sigelt_lid sigelts in
+                print_string "alpha\n";
                 let is_poly = List.fold (fun b x -> b || List.exists (fun y -> y.str = (fst x).str) datacon_lids) false (Map.toList all_calls) in
+                print_string "beta\n";
                 if is_poly then l@(mono_sigelt_2 env context x all_calls)
                 else l@[x]
 

@@ -493,10 +493,68 @@ let rec modul_to_string (m:modul) =
   Util.format2 "module %s\n%s" (sli m.name) (List.map sigelt_to_string m.declarations |> String.concat "\n")
 
 
+(** 
+    TODOS :
+    - introduce typedef everywhere in order not to worry about what is a union and what is a struct
+    - handling of the projectors
+**)
+
+
+(*** Pretty printing context ***)
+
+type pp_ctx = { 
+    ctyp_of : Map<string, string>;
+    structs : list<string>;
+    unions : list<string>;
+    datacons : list<string>;
+    typ_abbrev : list<string>;
+    }
+
+let pp_context = ref { ctyp_of = Map.empty; structs = []; unions = []; datacons = [] ; typ_abbrev = [] }
+
+let add_typ_of_to_context id typ =
+    pp_context := { !pp_context with ctyp_of = Map.add id typ (!pp_context).ctyp_of }
+
+let get_typ_of id =
+    let x = Map.tryFind id (!pp_context).ctyp_of in
+    match x with
+    | Some y -> y
+    | _ -> 
+        // TODO : FIXME
+        "struct"
+        //failwith (Util.format1 "Could not find the queried id in context : %s" id)
+
 (************* Debugging pretty printings ***************)
 let btvar_to_string btv =
     btv.v.ppname
 
+let tag_of_sigelt s = 
+    match s with
+  | Sig_tycon _ -> "Sig_tycon"
+  | Sig_kind_abbrev _ -> "Sig_kind_abbrev"
+  | Sig_typ_abbrev _ -> "Sig_typ_abbrev"
+  | Sig_datacon _ -> "Sig_datacon"
+  | Sig_val_decl _ -> "Sig_val_decl"
+  | Sig_assume _ -> "Sig_assume"
+  | Sig_let _ -> "Sig_let"
+  | Sig_main _ -> "Sig_main"
+  | Sig_bundle _ -> "Sig_bundle"
+  | Sig_new_effect _ -> "Sig_new_effect"
+  | Sig_sub_effect _ -> "Sig_sub_effect"
+  | Sig_effect_abbrev _ -> "Sig_effect_abbrev"
+  | Sig_pragma _ -> "Sig_pragma"
+
+let tag_of_pat p =
+    match p.v with
+    | Pat_disj _ -> "Pat_disj"
+    | Pat_constant _ -> "Pat_constant"
+    | Pat_cons _ -> "Pat_cons"
+    | Pat_var _ -> "Pat_var"
+    | Pat_tvar _ -> "Pat_tvar"
+    | Pat_wild _ -> "Pat_wild"
+    | Pat_twild _ -> "Pat_twild"
+    | Pat_dot_term _ -> "Pat_dot_term"
+    | Pat_dot_typ _ -> "Pat_dot_typ"
 
 (********** C pretty printing *********)
 let empty_env:FStar.Tc.Env.env =
@@ -511,11 +569,15 @@ let env:FStar.Tc.Env.env ref =
 // Automatically loaded modules, ignore as first apporximation
 let default_modules = ["Prims"; "FStar.Set"; "FStar.Heap"; "FStar.ST"; "FStar.All"]
 
+// Functions that are to be handled in a special way
+let special_funs = ["LSarray.upd"; "LSarray.get"; "LSarray.create"; "LSarray.sub"]  
+
+
 // Useful regular expressions
 let refinement_regex = new System.Text.RegularExpressions.Regex "([\(\w_]+)\:([\w_\s\(\)\.]+)\{([\w\s\(\)_.<>%\*\+]+)\}"
 let tuple2_regex = new System.Text.RegularExpressions.Regex "\(Tuple2[\s]+([\w_]+\**)[\s]+([\w_]+\**)\)"
 let ptr_regex = new System.Text.RegularExpressions.Regex "\(ptr ([\w_.]+)\)"
-let paren_regex_1 = new System.Text.RegularExpressions.Regex "[\(]+([\w_.\s]+)[\)]+"
+let paren_regex_1 = new System.Text.RegularExpressions.Regex "[\(]([\w_.\s]+)[\)]"
 
 // C printing functions
 
@@ -529,8 +591,16 @@ let pp_typ t =
     let s = refinement_regex.Replace(s, "$2") in
     let s = tuple2_regex.Replace(s, "_pair") in
     let s = ptr_regex.Replace(s, "$1*") in
+    let tmp2 = ref s in
+    let tmp = ref (paren_regex_1.Replace(s, "$1")) in
+    while (!tmp <> !tmp2 ) do
+        tmp2 := !tmp;
+        tmp := paren_regex_1.Replace(!tmp2, "$1")
+    done;
     let s = paren_regex_1.Replace(s, "$1") in
     let s = s.Replace(' ', '_') in
+    let s = s.Replace("(", "") in
+    let s = s.Replace(")", "") in   
     s
 
 let pp_lbname (n:lbname) : string = match n with | Inl bvd -> strBvd bvd | Inr lid -> sli lid
@@ -558,11 +628,11 @@ and pp_expr (expr:exp) : string =
     | Exp_delayed _ -> "Impossible, delayed expression/\n"
     | Exp_meta(Meta_desugared(e, _)) -> pp_expr e 
     | Exp_uvar(uv, t) -> "Pretty printing for uvar not implemented yet\n" //uvar_e_to_string (uv, t)
-    | Exp_bvar bvv -> strBvd bvv.v //Util.format2 "%s : %s" (strBvd bvv.v) (typ_to_string bvv.sort)
+    | Exp_bvar bvv -> (strBvd bvv.v) //Util.format2 "%s : %s" (strBvd bvv.v) (typ_to_string bvv.sort)
     | Exp_fvar(fv, _) ->  sli fv.v
     | Exp_constant c -> (c |> const_to_string)
     | Exp_abs(binders, e) -> "Lambda abstraction, should be inlined : " + (Util.format1 "%s" (Print.exp_to_string e)) + "\n"
-    | Exp_app(e, args) ->
+    | Exp_app(e, args) -> 
       let lex = if !Options.print_implicits then None else reconstruct_lex expr in
       (match lex with
       | Some es -> "ExpAppLex : " + "%[" ^ (String.concat "; " (List.map exp_to_string es)) ^ "]" + "\n"
@@ -574,10 +644,19 @@ and pp_expr (expr:exp) : string =
             Util.format3 "(%s %s %s)" (List.nth args' 0 |> pp_arg') (e|> pp_infix_prim_op) (List.nth args' 1 |> pp_arg')
           else if is_unary_prim_op e && List.length args' = 1 then
             Util.format2 "%s(%s)" (e|> pp_unary_prim_op) (List.nth args' 0 |> pp_arg')
-          else Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args))
+          else pp_application e args )
   | Exp_match(e, pats) -> 
+    // TODO : implement something reasonably clean for matches
     if List.length pats = 1 then
-        Util.format1 "(%s).proj" ( pp_expr e)
+        begin
+//            Printf.printf "Encountered a match with exp : %s\n" (Print.exp_to_string e); 
+//            Printf.printf "pat is : %s\n" (List.fold (fun s (x,y,z) -> s + " (" + (Print.pat_to_string x) + " " + (Print.exp_to_string z) + ")")  "" pats);
+            let pat = List.hd pats in
+            let pat, opt_e, e' = pat in
+            // TODO : minimal handlingn of things, FIXME
+            Printf.printf "Nature of the pattern : %s\n" (tag_of_pat pat);
+            Util.format1 "%s" ( pp_expr e' )
+        end
     else
         "Unsupported feature : match\n" 
   | Exp_ascribed(e, t, _) -> 
@@ -586,22 +665,100 @@ and pp_expr (expr:exp) : string =
         | Exp_match _ -> Util.format1 "%s" (pp_expr e)
         | _ -> Util.format2 "%s %s;\n" (t |> pp_typ) (e|> pp_expr)
     end
-  | Exp_let(lbs, e) -> Util.format2 "%s\n%s\n"
-    (pp_lbs lbs)
-    (e|> pp_expr)
+  | Exp_let(lbs, e) -> Util.format2 "%s\n%s\n" (pp_lbs lbs) (e|> pp_expr)
 
 and pp_lbs (lbs:letbindings) : string = 
     let lbs = snd lbs in
     let str = ref "" in
 
     for bd in lbs do
+        
         let typ = bd.lbtyp in
+        
+        Printf.printf ">>> %s | %s\n" (Print.typ_to_string typ) (tag_of_typ typ);
+
+        let is_unit t =
+            match t.n with
+            | Typ_const(ftvar) -> if ftvar.v.str = "Prims.unit" then true else false
+            | _ -> false in
+        let is_array t =
+            match t.n with
+            | Typ_app(t', args) ->                
+                begin
+                    match t'.n with
+                    | Typ_const(ftvar) -> if ftvar.v.str.Contains "LSarray.array" then true else false
+                    | _ -> false
+                end
+            | _ -> false in
+
         let exp = bd.lbdef in
         let bdname = bd.lbname in
-        str := !str + (Util.format2 "%s %s;\n" (pp_typ typ) (pp_lbname bdname));
-        str := !str + (Util.format2 "%s = %s;\n" (pp_lbname bdname) (pp_expr exp));
+
+        if is_unit typ then str := !str + (Util.format1 "%s;\n" (pp_expr exp))
+        else if is_array typ then (
+            // TODO : for now I consider that only LSarray.create may return an array
+            let v = pp_expr exp in
+            let v' = String.split ['|'] v in
+            let v' = List.toArray v' in
+            let t = v'.[0] in let len = v'.[1] in
+            str := !str +  (Util.format3 "%s %s[%s];\n" t (pp_lbname bdname) len);
+            if Array.length v' > 2 then
+                str := !str + (Util.format3 "%s = (%s + %s);\n" (pp_lbname bdname) v'.[2] v'.[3])
+            else ()
+            )
+        else (
+            str := !str + (Util.format2 "%s %s;\n" (pp_typ typ) (pp_lbname bdname));
+            str := !str + (Util.format2 "%s = %s;\n" (pp_lbname bdname) (pp_expr exp)); )
     done;
     !str
+
+and pp_application (e:exp) (args:args) : string =
+    match e.n with
+    | Exp_fvar(fv, quals) -> 
+        begin
+            match quals with
+            | Some y -> 
+                begin
+                    match y with
+                    | Data_ctor -> Util.format1 "{%s}" (pp_args args)
+                    | _ -> Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args) // TODO : rather a failwith, record should not exist
+                end 
+            | _ -> 
+                let lid = fv.v.str in
+                let v = List.tryFind (fun x  -> lid.Contains x) special_funs in
+                match v with
+                | Some f -> 
+                    if f = "LSarray.create" then
+                        match args with
+                        | ty::len::_ -> 
+                            begin
+                                let t = match ty with | Inl x, _ -> pp_typ x | _ -> failwith "expected a typ in pp_application" in
+                                Util.format2 "%s|%s" t (pp_arg' len)
+                            end
+                        | _ -> failwith (Util.format1 "Unable to handle those argument for array declaration : %s" (pp_args args))
+                    else if f = "LSarray.get" then
+                        match args with 
+                        | _::id::idx::_ -> Util.format2 "%s[%s]" (pp_arg' id) (pp_arg' idx)
+                        | _ -> failwith (Util.format1 "Unable to handle those argument for array access : %s" (pp_args args))
+                    else if f = "LSarray.sub" then
+                        match args with
+                        | ty::id::idx::len::_ -> //Util.format2 "(%s + %s)" (pp_arg' id) (pp_arg' idx)
+                            begin
+                                let t = match ty with | Inl x, _ -> pp_typ x | _ -> failwith "expected a typ in pp_application" in
+                                let s = String.concat "|" [t; " "; (pp_arg' id); (pp_arg' idx)] in
+                                print_string s; print_string "\n";
+                                s
+                            end
+                        | _ -> failwith (Util.format1 "Unable to handle those argument for sub array : %s" (pp_args args))
+                    else if f = "LSarray.upd" then
+                        match args with
+                        | _::id::idx::v::_ -> Util.format3 "%s[%s] = %s" (pp_arg' id) (pp_arg' idx) (pp_arg' v)
+                        | _ -> failwith (Util.format1 "Unable to handle those argument for array write : %s" (pp_args args))
+                    else failwith "pp_application found an unknown special function"
+                | _ -> Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args)
+        end
+    | _ -> Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args)  
+    
 
 let binder_name (b:binder) =
     match b with
@@ -634,7 +791,9 @@ let pp_data_con dcon =
     match dcon with 
     | Sig_datacon(lid, t, _, _, _, _) -> 
         begin
+            // Get the data constructor id
             let id = lid.str in
+            // Get its type
             let typ = Util.compress_typ t in
             match typ.n with
             | Typ_fun(binders, c) ->
@@ -643,6 +802,7 @@ let pp_data_con dcon =
                 | Total t' ->
                     Some (pp_typ t', (id, pp_binders true binders))
                 | Comp c' -> 
+                    // JK : Can this particular case happen for data constructors ?
                     Printf.printf "\nComp type : %s \n" (pp_typ c'.result_typ);
                     None
                 )
@@ -661,6 +821,21 @@ let pp_data_con dcon =
         end
     | _ -> None
 
+let pp_typ_abbrev typ_ab =
+    match typ_ab with
+    | Sig_typ_abbrev(lid, bds, knd, t, quals, r) ->
+        begin
+            let id = lid.str in
+            let typ = Util.compress_typ t in
+            match typ.n with
+            | Typ_app(t', args) ->
+                begin
+                    (id, pp_typ typ)
+                end
+            | _ -> failwith (Util.format1 "Unhandled %s in pp_typ_abbrev" (tag_of_typ typ))
+        end
+    | _ -> failwith (Util.format1 "Expected a Sig_typ_abbrev, got a %s" (tag_of_sigelt typ_ab))
+
 let rec pp_bundle' s typ_map =
     match s with
     | [] -> typ_map
@@ -670,6 +845,8 @@ let rec pp_bundle' s typ_map =
             begin
                 match pp_data_con x with
                 | Some v -> 
+                    // Record that it was a data constructor for later
+                    pp_context := {!pp_context with datacons = (fst v)::(!pp_context).datacons };
                     if Map.containsKey (fst v) typ_map
                     then
                         let old_val = Map.find (fst v) typ_map in 
@@ -681,8 +858,22 @@ let rec pp_bundle' s typ_map =
                 | None -> 
                     pp_bundle' tl typ_map
             end
+        | Sig_typ_abbrev _ ->
+            begin
+                // Record that it was a typ abbrev
+                let pp = pp_typ_abbrev x in
+                pp_context := {!pp_context with typ_abbrev = (fst pp)::(!pp_context).typ_abbrev};
+                // TODO : implement properly : the arguments types have to be taken into account
+                let typ_map = Map.add (fst pp) ([(snd pp, [])]) typ_map in 
+                pp_bundle' tl typ_map
+            end
+        | Sig_tycon(lid, binders, knd, mutuals, datacons, quals, _) ->
+            begin
+                Printf.printf "\n/!\\ Omitting %s\n" (Print.sigelt_to_string x);
+                pp_bundle' tl typ_map
+            end
         | _ -> 
-            Printf.printf "\n/!\\%s\n" (sigelt_to_string x);
+            Printf.printf "\n/!\\ unsupported sigelt in pp_bundle' %s\n" (tag_of_sigelt x);
             pp_bundle' tl typ_map
 
 let pp_bundle s = 
@@ -694,116 +885,147 @@ let pp_bundle s =
     let typ_map = pp_bundle' s typ_map in
     
     for top, typ_list in Map.toList typ_map do
-        if List.length typ_list > 1 
-        then 
-            begin
-                let s = Util.format1 "union %s;\n" top in
-                str := !str + s;
-                print_string s;
-                union_list := top::!union_list;
-            end
-        else 
-            begin
-                let s = Util.format1 "struct %s;\n" top in
-                str := !str + s;
-                print_string s;
-                struct_list := top::!struct_list;
-            end 
-    done;
-
-    for top, typ_list in Map.toList typ_map do
-        if List.length typ_list > 1 
-        then 
-            begin
-                for (id, types) in typ_list do
-                    let s = Util.format1 "\nstruct %s {\n" (id.Replace('.', '_')) in
+        if List.contains top (!pp_context).datacons then
+            if List.length typ_list > 1 
+            then 
+                begin
+                    add_typ_of_to_context top "union";
+                    let s = Util.format1 "union %s;\n" top in
                     str := !str + s;
                     print_string s;
-                    let var_list = ref [] in
-                    for binder,typ in types do
-                        if typ = "Type" then var_list := binder::!var_list
-                        else 
-//                                 let ty = (typ.Split [|' '|]).[0] in
-//                                if List.mem ty !var_list then Printf.printf"\t%s %s;\n" "void*" binder
-
-                            // Check for a pointer type
-                            if String.length typ >= 5 && typ.Substring(0,5) = "(ptr " then (
-                                let typ = typ.Replace("(ptr ", "(") + "*" in
-                                let s = Util.format2 "\t%s %s;\n" typ binder in
-                                str := !str + s;
-                                print_string s;
-                            )
-                            else if List.mem typ !union_list then begin 
-                                let s = Util.format2 "\tunion %s %s;\n" typ binder in
-                                str := !str + s;
-                                print_string s; end
-                            else if List.mem typ !struct_list then begin
-                                let s = Util.format2 "\tstruct %s %s;\n" typ binder in
-                                str := !str + s;
-                                print_string s end
-                            else begin
-                                let s = Util.format2 "\t%s %s;\n" typ binder in
-                                str := !str + s;
-                                print_string s end
-                    done;
-                    let s = "};\n\n" in
-                    str := ! str + s;
+                    union_list := top::!union_list;
+                end
+            else 
+                begin
+                    add_typ_of_to_context top "struct";
+                    let s = Util.format1 "struct %s;\n" top in
+                    str := !str + s;
                     print_string s;
-                done;   
+                    struct_list := top::!struct_list;
+                end 
+        else if List.contains top (!pp_context).typ_abbrev then
+            begin
+                let t = get_typ_of (fst (List.hd typ_list)) in
+                if t = "struct" then
+                    begin
+                        add_typ_of_to_context top "struct";
+                        let s = Util.format2 "struct %s = %s;\n" top (fst (List.hd typ_list)) in
+                        str := !str + s;
+                        print_string s;
+                    end
             end
     done;
 
     for top, typ_list in Map.toList typ_map do
-        if List.length typ_list > 1 
-        then 
+        if List.contains top (!pp_context).datacons then
             begin
-                let s = Util.format1 "union %s{\n" top in
-                str := !str + s;
-                print_string s;
-                for (id, types) in typ_list do
-                    let short_id = let v = id.Split [|'.'|] in v.[Array.length v - 1] in
-                    let s = Util.format2 "\tstruct %s %s;\n" (id.Replace('.', '_')) short_id in
-                    str := !str + s;
-                    print_string s;
-                done;   
-                let s = "};\n\n" in
-                str := !str + s;
-                print_string s;
+            if List.length typ_list > 1 
+            then 
+                begin
+                    for (id, types) in typ_list do
+                        let s = Util.format1 "\nstruct %s {\n" (id.Replace('.', '_')) in
+                        str := !str + s;
+                        print_string s;
+                        let var_list = ref [] in
+                        for binder,typ in types do
+                            if typ = "Type" then var_list := binder::!var_list
+                            else 
+    //                                 let ty = (typ.Split [|' '|]).[0] in
+    //                                if List.mem ty !var_list then Printf.printf"\t%s %s;\n" "void*" binder
+
+                                // Check for a pointer type
+                                if String.length typ >= 5 && typ.Substring(0,5) = "(ptr " then (
+                                    let typ = typ.Replace("(ptr ", "(") + "*" in
+                                    let s = Util.format2 "\t%s %s;\n" typ binder in
+                                    str := !str + s;
+                                    print_string s;
+                                )
+                                else if List.mem typ !union_list then begin 
+                                    let s = Util.format2 "\tunion %s %s;\n" typ binder in
+                                    str := !str + s;
+                                    print_string s; end
+                                else if List.mem typ !struct_list then begin
+                                    let s = Util.format2 "\tstruct %s %s;\n" typ binder in
+                                    str := !str + s;
+                                    print_string s end
+                                else begin
+                                    let s = Util.format2 "\t%s %s;\n" typ binder in
+                                    str := !str + s;
+                                    print_string s end
+                        done;
+                        let s = "};\n\n" in
+                        str := ! str + s;
+                        print_string s;
+                    done;   
+                end
         end
-        else 
+        else if List.contains top (!pp_context).typ_abbrev then
             begin
-                let s = Util.format1 "struct %s{\n" top in
-                str := !str + s;
-                print_string s;
-                for (id, types) in typ_list do
-                    let var_list = ref [] in
-                    for binder,typ in types do
-                        if typ = "Type" then var_list := binder::!var_list
-                        else 
-                            // Check for a pointer type
-                            if String.length typ >= 5 && typ.Substring(0,5) = "(ptr " then (
-                                let typ = typ.Replace("(ptr ", "(") + "*" in
-                                let s = Util.format2 "\t%s %s;\n" typ binder in
-                                str := !str + s;
-                                print_string s;
-                            )
-                            else if List.mem typ !union_list then begin
-                                let s = Util.format2 "\tunion %s %s;\n" typ binder in
-                                str := !str + s;
-                                print_string s; end
-                            else if List.mem typ !struct_list then begin
-                                let s = Util.format2 "\tstruct %s %s;\n" typ binder in
-                                str := !str + s;
-                                print_string s; end
-                            else begin
-                                let s = Util.format2 "\t%s %s;\n" typ binder in
-                                str := !str + s;
-                                print_string s; end
-                    done;
-                done;   
-                let s = "};\n\n" in
-                str := !str + s;
-                print_string s;
+                ()
+//                let t = get_typ_of (fst (List.hd typ_list)) in
+//                if t = "struct" then
+//                    begin
+//                        add_typ_of_to_context top "struct";
+//                        let s = Util.format2 "struct %s = %s;" top t in
+//                        str := !str + s;
+//                    end
+            end
+    done;
+
+    for top, typ_list in Map.toList typ_map do
+        if List.contains top (!pp_context).datacons then
+        begin
+            if List.length typ_list > 1 
+            then 
+                begin
+                    let s = Util.format1 "union %s{\n" top in
+                    str := !str + s;
+                    print_string s;
+                    for (id, types) in typ_list do
+                        let short_id = let v = id.Split [|'.'|] in v.[Array.length v - 1] in
+                        let s = Util.format2 "\tstruct %s %s;\n" (id.Replace('.', '_')) short_id in
+                        str := !str + s;
+                        print_string s;
+                    done;   
+                    let s = "};\n\n" in
+                    str := !str + s;
+                    print_string s;
+            end
+            else 
+                begin
+                    let s = Util.format1 "struct %s{\n" top in
+                    str := !str + s;
+                    print_string s;
+                    for (id, types) in typ_list do
+                        let var_list = ref [] in
+                        for binder,typ in types do
+                            if typ = "Type" then var_list := binder::!var_list
+                            else 
+                                // Check for a pointer type
+                                if String.length typ >= 5 && typ.Substring(0,5) = "(ptr " then (
+                                    let typ = typ.Replace("(ptr ", "(") + "*" in
+                                    let s = Util.format2 "\t%s %s;\n" typ binder in
+                                    str := !str + s;
+                                    print_string s;
+                                )
+                                else if List.mem typ !union_list then begin
+                                    let s = Util.format2 "\tunion %s %s;\n" typ binder in
+                                    str := !str + s;
+                                    print_string s; end
+                                else if List.mem typ !struct_list then begin
+                                    let s = Util.format2 "\tstruct %s %s;\n" typ binder in
+                                    str := !str + s;
+                                    print_string s; end
+                                else begin
+                                    let s = Util.format2 "\t%s %s;\n" typ binder in
+                                    str := !str + s;
+                                    print_string s; end
+                        done;
+                    done;   
+                    let s = "};\n\n" in
+                    str := !str + s;
+                    print_string s;
+                end
             end
     done;
     !str
