@@ -39,7 +39,7 @@ val gindex: #a:Type -> t:array a -> GTot (index:nat{ index = (Array.start t)})
 let gindex t = (Array.start t)
 
 type live (#a:Type) (t:array a) (m:smem) = 
-  (liveRef (reveal (asRef t)) m)
+  (refIsLive (reveal (asRef t)) m)
   /\ (Seq.length (lookupRef (reveal (asRef t)) m) >= gindex t + glength t)
 
 assume val create:
