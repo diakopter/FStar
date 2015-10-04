@@ -15,18 +15,19 @@ open FStar.Ghost
 open Regions
 open Stack
 
+(*
 type ptr (a:Type) = | Ptr: v:a -> ptr a
 
 type list (a:Type) =
   | Nil
   | Cons: hd:a -> tl:list a -> list a
+*)
 
 type pair (a:Type) (b:Type) = | Pair: fst:a -> snd:b -> pair a b
 
 type option (a:Type) =
   | None
   | Some : v:a -> option a
-
 
 (* Test type, not polymorphic *)
 type t =
@@ -35,6 +36,7 @@ type t =
   | C: x:int -> t
   | D: x:int -> y:char -> t
 
+(*
 val hd: #a:Type -> l:list a{ is_Cons l } -> Tot a
 let hd l =
   Cons.hd l
@@ -60,6 +62,7 @@ let test_hd_2 x y =
   let l = Cons x (Cons y Nil) in
   let res = hd l in
   res
+*)
 
 val test_pair_1: #a:Type -> #b:Type -> x:a -> y:b -> Tot (pair a b)
 let test_pair_1 x y =
@@ -113,9 +116,10 @@ let do_nothing x y =
 val double_gtot: int -> GTot int
 let double_gtot x = 2 * x
 
-
+(*
 type opt_list (a:Type) = option (ref (_opt_list a))
 and _opt_list (a:Type) = | L: hd:a -> tl:opt_list a -> _opt_list a
+*)
 
 val array_test: 
   int -> Mem int (requires (fun m -> isNonEmpty (st m))) (ensures (fun m0 _ m1 -> True)) (hide empty)
@@ -129,4 +133,4 @@ let array_test x =
   let v = LSarray.get buffer 32 in
   let sub_buffer = LSarray.sub buffer 42 128 in
   0
-  
+

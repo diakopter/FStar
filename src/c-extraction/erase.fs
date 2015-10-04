@@ -10,7 +10,7 @@ open FStar.Extraction.C.Util
 
 // Functions to be ignored
 // TODO : extend, complete ...
-let erase_default = ["Prims.erase"; "Prims.admit"; "Prims.cut"; "Prims.admitP"; "Prims.assert"]
+let erase_default = ["Prims.erase"; "Prims.admit"; "Prims.cut"; "Prims.admitP"; "Prims.assert"; "Prims._assert"]
 
 // Effects to be erased
 let effects_to_erase = ["Prims.GTot"; "Prims.Lemma"]
@@ -30,40 +30,6 @@ let add_erased_binder_to_context ctx str =
     let erased_binders = ctx.erased_binders in
     if List.contains str erased_binders then ctx
     else { ctx with erased_binders = str::ctx.erased_binders }
-
-(* Analyses a type to determine whether or not it should be erased.
-    Returns "true" if the type is erasable, false otherwise.
- *)
-let is_erasable_typ ty =
-    match ty.n with
-    | Typ_fun(_, c) -> 
-        begin
-        match c.n with
-        | Total t -> 
-            begin
-            match t.n with
-            | Typ_const v -> 
-//                        Printf.printf "res type : %s \n" (Print.tag_of_typ t);
-                if v.v.str = "Prims.unit" then true // 'a -> Tot unit functions are erased
-                else false
-            | _ -> false
-            end
-        | Comp c -> 
-            let t = c.result_typ in
-            let effect = c.effect_name in
-            match t.n with
-            | Typ_const v -> 
-//                        Printf.printf "Full effect name : %s\n" effect.str;
-                // GTot functions, lemmas and 'a -> Tot unit funtions are to be erased
-                if List.contains effect.str effects_to_erase || effect.str = "Prims.Tot" && v.v.str = "Prims.unit" 
-                then true
-                else false
-            | _ -> false
-        end
-    
-    // TODO : complete with other types to erase. E.g. : Typ_ascribed
-    | _ -> false
-
 
 (* Erase part of an expression based on previously collected erasable values *)
 let rec erase_exp (context:erasure_context) (e:exp) =

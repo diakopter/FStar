@@ -22,6 +22,7 @@ open FStar.Absyn
 open FStar.Util
 open FStar.Absyn.Syntax
 open FStar.Absyn.Util
+open FStar.Extraction.C.Util
 
 (* CH: This should later be shared with ocaml-codegen.fs and util.fs (is_primop and destruct_typ_as_formula) *)
 let infix_prim_ops = [
@@ -619,7 +620,7 @@ let rec pp_arg a =
 and pp_arg' a = match pp_arg a with | None -> "" | Some v -> v
 
 and pp_args args = 
-    let args = List.fold (fun l a -> match pp_arg a with | None -> l | Some v -> v::l) [] args in
+    let args = List.fold (fun l a -> match pp_arg a with | None -> l | Some v -> l@[v]) [] args in
     String.concat ", " args
 
 and pp_expr (expr:exp) : string =
@@ -629,7 +630,7 @@ and pp_expr (expr:exp) : string =
     | Exp_meta(Meta_desugared(e, _)) -> pp_expr e 
     | Exp_uvar(uv, t) -> "Pretty printing for uvar not implemented yet\n" //uvar_e_to_string (uv, t)
     | Exp_bvar bvv -> (strBvd bvv.v) //Util.format2 "%s : %s" (strBvd bvv.v) (typ_to_string bvv.sort)
-    | Exp_fvar(fv, _) ->  sli fv.v
+    | Exp_fvar(fv, _) ->  fv.v.str.Replace(".", "_")
     | Exp_constant c -> (c |> const_to_string)
     | Exp_abs(binders, e) -> "Lambda abstraction, should be inlined : " + (Util.format1 "%s" (Print.exp_to_string e)) + "\n"
     | Exp_app(e, args) -> 
@@ -694,14 +695,21 @@ and pp_lbs (lbs:letbindings) : string =
         let exp = bd.lbdef in
         let bdname = bd.lbname in
 
-        if is_unit typ then str := !str + (Util.format1 "%s;\n" (pp_expr exp))
+        if is_unit typ then (
+            str := !str + (Util.format1 "%s;\n" (pp_expr exp))
+        )
+        else if is_datactor exp then (
+            str := !str + (Util.format3 "%s %s = %s;\n" (pp_typ typ) (pp_lbname bdname) (pp_expr exp))
+            )
         else if is_array typ then (
             // TODO : for now I consider that only LSarray.create may return an array
+            // TODO : handle 'sub'
             let v = pp_expr exp in
             let v' = String.split ['|'] v in
             let v' = List.toArray v' in
             let t = v'.[0] in let len = v'.[1] in
-            str := !str +  (Util.format3 "%s %s[%s];\n" t (pp_lbname bdname) len);
+            if len = " " then str := !str + (Util.format2 "%s *%s;\n" t (pp_lbname bdname))
+            else str := !str +  (Util.format3 "%s %s[%s];\n" t (pp_lbname bdname) len);
             if Array.length v' > 2 then
                 str := !str + (Util.format3 "%s = (%s + %s);\n" (pp_lbname bdname) v'.[2] v'.[3])
             else ()
@@ -721,8 +729,10 @@ and pp_application (e:exp) (args:args) : string =
                 begin
                     match y with
                     | Data_ctor -> Util.format1 "{%s}" (pp_args args)
-                    | _ -> Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args) // TODO : rather a failwith, record should not exist
-                end 
+                    | _ -> 
+                        // TODO : rather a failwith, record should not exist
+                        if List.exists (fun s -> fv.v.str.Contains s) Erasure.erase_default then ""
+                        else Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args)                 end 
             | _ -> 
                 let lid = fv.v.str in
                 let v = List.tryFind (fun x  -> lid.Contains x) special_funs in
@@ -755,7 +765,9 @@ and pp_application (e:exp) (args:args) : string =
                         | _::id::idx::v::_ -> Util.format3 "%s[%s] = %s" (pp_arg' id) (pp_arg' idx) (pp_arg' v)
                         | _ -> failwith (Util.format1 "Unable to handle those argument for array write : %s" (pp_args args))
                     else failwith "pp_application found an unknown special function"
-                | _ -> Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args)
+                | _ -> 
+                    if List.exists (fun s -> fv.v.str.Contains s) Erasure.erase_default then ""
+                    else Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args)
         end
     | _ -> Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args)  
     
@@ -807,16 +819,33 @@ let pp_data_con dcon =
                     None
                 )
             | Typ_const v -> 
-                Some (pp_typ t, (id, ["NULL", "void"]))
-            | Typ_delayed _ -> print_string "Type_delayed\n"; None
-            | Typ_meta(Meta_named(_, l)) -> print_string "Typ_meta\n"; None
-            | Typ_meta meta ->  print_string "Typ_meta\n"; None
-            | Typ_btvar btv ->print_string "Typ_btvar\n"; None
-            | Typ_refine(xt, f) ->print_string "Typ_refine\n"; None
-            | Typ_app(_, []) -> failwith "Empty args!"
-            | Typ_app(t, args) -> print_string "Typ_app\n"; None
-            | Typ_lam(binders, t2) ->  print_string "Typ_lam\n"; None
-            | Typ_ascribed(t, k) ->print_string "Typ_ascribed\n"; None
+                Some (pp_typ t, (id, ["tag", "char"]))
+            | Typ_delayed _ -> 
+//                print_string "Type_delayed\n"; 
+                None
+            | Typ_meta(Meta_named(_, l)) -> 
+//                print_string "Typ_meta\n"; 
+                None
+            | Typ_meta meta ->  
+//                print_string "Typ_meta\n"; 
+                None 
+            | Typ_btvar btv ->
+//                print_string "Typ_btvar\n"; 
+                None
+            | Typ_refine(xt, f) ->
+//                print_string "Typ_refine\n"; 
+                None
+            | Typ_app(_, []) -> 
+                failwith "Empty args!"
+            | Typ_app(t, args) -> 
+//                print_string "Typ_app\n"; 
+                None
+            | Typ_lam(binders, t2) ->  
+//                print_string "Typ_lam\n"; 
+                None
+            | Typ_ascribed(t, k) ->
+//                print_string "Typ_ascribed\n"; 
+                None
             | _ -> None
         end
     | _ -> None
@@ -890,7 +919,7 @@ let pp_bundle s =
             then 
                 begin
                     add_typ_of_to_context top "union";
-                    let s = Util.format1 "union %s;\n" top in
+                    let s = Util.format2 "typedef union _%s %s;\n" top top in
                     str := !str + s;
                     print_string s;
                     union_list := top::!union_list;
@@ -898,7 +927,7 @@ let pp_bundle s =
             else 
                 begin
                     add_typ_of_to_context top "struct";
-                    let s = Util.format1 "struct %s;\n" top in
+                    let s = Util.format2 "typedef struct _%s %s;\n" top top in
                     str := !str + s;
                     print_string s;
                     struct_list := top::!struct_list;
@@ -909,7 +938,7 @@ let pp_bundle s =
                 if t = "struct" then
                     begin
                         add_typ_of_to_context top "struct";
-                        let s = Util.format2 "struct %s = %s;\n" top (fst (List.hd typ_list)) in
+                        let s = Util.format2 "typedef struct _%s %s;\n" (fst (List.hd typ_list)) top in
                         str := !str + s;
                         print_string s;
                     end
@@ -923,7 +952,7 @@ let pp_bundle s =
             then 
                 begin
                     for (id, types) in typ_list do
-                        let s = Util.format1 "\nstruct %s {\n" (id.Replace('.', '_')) in
+                        let s = Util.format1 "\ntypedef struct _%s {\n" (id.Replace('.', '_')) in
                         str := !str + s;
                         print_string s;
                         let var_list = ref [] in
@@ -953,7 +982,7 @@ let pp_bundle s =
                                     str := !str + s;
                                     print_string s end
                         done;
-                        let s = "};\n\n" in
+                        let s = Util.format1 "} %s;\n\n" (id.Replace('.', '_')) in
                         str := ! str + s;
                         print_string s;
                     done;   
@@ -983,7 +1012,8 @@ let pp_bundle s =
                     print_string s;
                     for (id, types) in typ_list do
                         let short_id = let v = id.Split [|'.'|] in v.[Array.length v - 1] in
-                        let s = Util.format2 "\tstruct %s %s;\n" (id.Replace('.', '_')) short_id in
+//                        let s = Util.format2 "\tstruct %s %s;\n" (id.Replace('.', '_')) short_id in
+                        let s = Util.format2 "\n%s %s;\n" (id.Replace('.', '_')) short_id in
                         str := !str + s;
                         print_string s;
                     done;   
@@ -993,7 +1023,7 @@ let pp_bundle s =
             end
             else 
                 begin
-                    let s = Util.format1 "struct %s{\n" top in
+                    let s = Util.format1 "struct _%s{\n" top in
                     str := !str + s;
                     print_string s;
                     for (id, types) in typ_list do
@@ -1003,17 +1033,19 @@ let pp_bundle s =
                             else 
                                 // Check for a pointer type
                                 if String.length typ >= 5 && typ.Substring(0,5) = "(ptr " then (
-                                    let typ = typ.Replace("(ptr ", "(") + "*" in
+                                    let typ = typ.Replace("(ref ", "(") + "*" in
                                     let s = Util.format2 "\t%s %s;\n" typ binder in
                                     str := !str + s;
                                     print_string s;
                                 )
                                 else if List.mem typ !union_list then begin
-                                    let s = Util.format2 "\tunion %s %s;\n" typ binder in
+//                                    let s = Util.format2 "\tunion %s %s;\n" typ binder in
+                                    let s = Util.format2 "\t%s %s;\n" typ binder in
                                     str := !str + s;
                                     print_string s; end
                                 else if List.mem typ !struct_list then begin
-                                    let s = Util.format2 "\tstruct %s %s;\n" typ binder in
+//                                    let s = Util.format2 "\tstruct %s %s;\n" typ binder in
+                                    let s = Util.format2 "\t%s %s;\n" typ binder in
                                     str := !str + s;
                                     print_string s; end
                                 else begin
@@ -1062,55 +1094,66 @@ let pp_fun_decl_args sep bs : string =
     !res |> String.concat sep
 
 let pp_fun_decl lid t : string =
-   let typ = Util.compress_typ t in
-   let str = match typ.n with
-            | Typ_fun(binders, c) ->
-            (
-                match c.n with
-                | Total t' ->
-                    let res_typ = pp_typ t' in
-                    Util.format3 "%s %s(%s)" res_typ lid.str (pp_fun_decl_args ", " binders)
-                | Comp c' -> 
-                    let res_typ = Print.typ_to_string c'.result_typ in
-                    Util.format3 "%s %s(%s)" res_typ lid.str (pp_fun_decl_args ", " binders)
-            )
-            | _ -> "" in
-    str
+    let typ = Util.compress_typ t in
+
+    Printf.printf "Top function type : %s and tag %s\n" (Print.typ_to_string t) (tag_of_typ t);
+    if is_erasable_typ t then ""
+    else if lid.str.Contains "is_" then ""
+    else if has_btvars_typ t then ""
+    else 
+        let str = match typ.n with
+                | Typ_fun(binders, c) ->
+                (
+                    match c.n with
+                    | Total t' ->
+                        let res_typ = pp_typ t' in
+                        Util.format3 "%s %s(%s)" res_typ (lid.str.Replace('.', '_')) (pp_fun_decl_args ", " binders)
+                    | Comp c' -> 
+                        let res_typ = Print.typ_to_string c'.result_typ in
+                        Util.format3 "%s %s(%s)" res_typ (lid.str.Replace('.', '_')) (pp_fun_decl_args ", " binders)
+                )
+                | _ -> "" in
+        str
 
 let rec pp_top_fun fname ftyp fexp quals : string =
     let str = ref "" in
-    let exp = Util.compress_exp fexp in
-    let _ = match exp.n with
-            | Exp_abs(binders, e) -> // Top level function declaration
-                if (contains_kind binders) then ()
-                else (
-                let fname = match fname with
-                | Inr n -> n.str
-                | Inl n -> "WARNING : bound vars should not appear here\n" in
-                let arg_names =
-                    let binders = filter_imp binders in
-                    binders |> List.map binder_name in
-                let ret_type, arg_types = fun_types ftyp in
-                let args = List.map2 (fun t b -> (pp_typ t) + " " + b) arg_types arg_names in
-                str := !str + (Util.format3 "%s %s(%s)\n{\n" (pp_typ ret_type) fname (String.concat ", " args));                
-                str := !str + (pp_expr e) + "\n}\n";        
-                let lines = (!str).Split([|'\n';'\r'|], System.StringSplitOptions.RemoveEmptyEntries) in
-                Array.set lines (Array.length lines - 2) ("return " + lines.[Array.length lines - 2] + ";");
-                str := String.concat "\n" (Array.toList lines)
-                )
-            | Exp_ascribed(e, t, _) -> // Go one step deeper
-                str := ! str + (pp_top_fun fname t e quals)
-            | Exp_delayed _ -> str := !str + "\n Ignored delayed " + (pp_expr exp) + "\n"
-            | Exp_meta(Meta_desugared(e, _)) ->str := !str + "\n Ignored meta " + (pp_expr exp) + "\n"
-            | Exp_uvar(uv, t) -> str := !str + "\n Ignored uvar" + (pp_expr exp) + "\n"
-            | Exp_bvar bvv -> str := !str + "\n Ignored bvar" + (pp_expr exp) + "\n"
-            | Exp_fvar(fv, _) ->  str := !str + "\n Ignored fvar" + (pp_expr exp) + "\n"
-            | Exp_constant c -> str := !str + "\n Ignored constant" + (pp_expr exp) + "\n"
-            | Exp_app(e, args) -> str := !str + "\n Ignored app" + (pp_expr exp) + "\n"
-            | Exp_match(e, pats) -> str := !str + "\n Ignored match" + (pp_expr exp) + "\n"
 
-            | Exp_let(lbs, e) -> str := !str + "\n Ignored let" + (pp_expr exp) + "\n" in
-    !str
+    //Printf.printf "Top function type : %s and tag %s and quals %s\n" (Print.typ_to_string ftyp) (tag_of_typ ftyp) (Print.quals_to_string quals);
+    if is_erasable_typ ftyp || List.contains Logic quals  then ""
+    else 
+
+        let exp = Util.compress_exp fexp in
+        let _ = match exp.n with
+                | Exp_abs(binders, e) -> // Top level function declaration
+                    if (contains_kind binders) then ()
+                    else (
+                    let fname = match fname with
+                    | Inr n -> n.str.Replace('.', '_')
+                    | Inl n -> "WARNING : bound vars should not appear here\n" in
+                    let arg_names =
+                        let binders = filter_imp binders in
+                        binders |> List.map binder_name in
+                    let ret_type, arg_types = fun_types ftyp in
+                    let args = List.map2 (fun t b -> (pp_typ t) + " " + b) arg_types arg_names in
+                    str := !str + (Util.format3 "%s %s(%s)\n{\n" (pp_typ ret_type) fname (String.concat ", " args));                
+                    str := !str + (pp_expr e) + "\n}\n";        
+                    let lines = (!str).Split([|'\n';'\r'|], System.StringSplitOptions.RemoveEmptyEntries) in
+                    Array.set lines (Array.length lines - 2) ("return " + lines.[Array.length lines - 2] + ";");
+                    str := String.concat "\n" (Array.toList lines)
+                    )
+                | Exp_ascribed(e, t, _) -> // Go one step deeper
+                    str := ! str + (pp_top_fun fname t e quals)
+                | Exp_delayed _ -> str := !str + "\n Ignored delayed " + (pp_expr exp) + "\n"
+                | Exp_meta(Meta_desugared(e, _)) ->str := !str + "\n Ignored meta " + (pp_expr exp) + "\n"
+                | Exp_uvar(uv, t) -> str := !str + "\n Ignored uvar" + (pp_expr exp) + "\n"
+                | Exp_bvar bvv -> str := !str + "\n Ignored bvar" + (pp_expr exp) + "\n"
+                | Exp_fvar(fv, _) ->  str := !str + "\n Ignored fvar" + (pp_expr exp) + "\n"
+                | Exp_constant c -> str := !str + "\n Ignored constant" + (pp_expr exp) + "\n"
+                | Exp_app(e, args) -> str := !str + "\n Ignored app" + (pp_expr exp) + "\n"
+                | Exp_match(e, pats) -> str := !str + "\n Ignored match" + (pp_expr exp) + "\n"
+
+                | Exp_let(lbs, e) -> str := !str + "\n Ignored let" + (pp_expr exp) + "\n" in
+        !str
 
 let pp_top_let elet quals =
     let (lbs:letbindings), e = match elet.n with | Exp_let(lbs, e) -> lbs, e | _ -> failwith "impossible" in

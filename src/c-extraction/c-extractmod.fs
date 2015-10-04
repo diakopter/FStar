@@ -31,6 +31,7 @@ let rec extract_sig (* (g:env) *) (se:sigelt) : string (* env * list<mlmodule1> 
         | Sig_bundle _
         | Sig_tycon _
         | Sig_typ_abbrev _ ->
+
             FStar.Extraction.C.ExtractTyp.extractSigElt se
 
         | Sig_let (lbs, r, _, quals) ->
@@ -46,7 +47,8 @@ let rec extract_sig (* (g:env) *) (se:sigelt) : string (* env * list<mlmodule1> 
 
        | Sig_val_decl(lid, t, quals, r) ->
 
-            let str = PrettyPrint.pp_fun_decl lid t + ";\n" in
+            let str = PrettyPrint.pp_fun_decl lid t in
+            let str = if str = "" then "" else Util.format1 "%s;\n" str in
             Printf.printf "%s\n" str;
             str
 
@@ -64,6 +66,9 @@ let rec extract_sig (* (g:env) *) (se:sigelt) : string (* env * list<mlmodule1> 
             ""
 
 
+let header = 
+    "#include<stdio.h>\n\ntypedef int a;\n\n"
+
 let rec extract (* (g:env) *) (m:modul) : list<lident * string> (* env * list<mllib> *) =
 
     Util.reset_gensym();
@@ -78,7 +83,7 @@ let rec extract (* (g:env) *) (m:modul) : list<lident * string> (* env * list<ml
         []
 
     else 
-        [m.name, List.fold (fun s x -> s + extract_sig x) "" m.declarations]
+        [m.name, List.fold (fun s x -> s + extract_sig x) header m.declarations]
 
 let format (m:lident * string) =
     let id = fst m in
