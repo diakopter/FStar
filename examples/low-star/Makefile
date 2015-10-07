@@ -40,5 +40,23 @@ demo: $(SST_FILES) CBuffer.ml CSystem.ml Demo.ml Test.ml
 verify: demo.fst
 	$(FSTAR) $^
 
+### NB : only works using the c-extraction branch of F* ###
+test2: codegen2 demo2
+
+codegen2: ex2.fst
+#	Because of excessive debugging information, not printing F* output
+	$(FSTAR) $^ > /dev/null
+	@echo
+	@echo "Verification was successful, compiling..."
+	@echo
+	gcc Ex2.c test2.c -o test2
+	@echo "123, not encrypted so far" > test2.txt
+	@echo
+	@echo "Created dummy file containing \" 123, not encrypted so far"
+	@echo
+	./test2 test2.txt
+	@rm test2.txt
+###
+
 clean:
 	rm -f *.ml *.cmi *.cmo *.cmx *.o || true

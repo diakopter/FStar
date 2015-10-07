@@ -67,7 +67,7 @@ let rec extract_sig (* (g:env) *) (se:sigelt) : string (* env * list<mlmodule1> 
 
 
 let header = 
-    "#include<stdio.h>\n\ntypedef int a;\n\n"
+    "#include<stdio.h>\n\n"
 
 let rec extract (* (g:env) *) (m:modul) : list<lident * string> (* env * list<mllib> *) =
 

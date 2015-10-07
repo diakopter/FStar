@@ -334,9 +334,19 @@ let rec eq_typ_args (a1:list<option<typ>>) (a2:list<option<typ>>) =
     | _ -> false
 
 let subst_with_new_types caller_binders (caller_types:list<option<typ>>) current_types =
+    
+    let rec mk_list n l = if n > 0 then None::(mk_list (n-1) l) else l in
 
-    if List.length caller_binders <> List.length caller_types then
+
+    if List.length caller_binders <> List.length caller_types then (
+        Printf.printf "binders : %s\n" (List.fold (fun s x -> s + " " + (match x with | Some y -> y.v.ppname.idText | None -> "_")) "" caller_binders);
         Printf.printf "orig : %s\n" (List.fold (fun s x -> match x with | Some y -> s + (Print.typ_to_string y) + " " | None -> s +  "_ ") "" current_types);
+        Printf.printf "new : %s\n" (String.concat " " (List.map (fun x -> match x with | Some y -> Print.typ_to_string y | _ -> "_") caller_types)));
+            
+    let caller_binders = 
+        if List.length caller_binders < List.length caller_types 
+        then caller_binders@(mk_list (List.length caller_types - List.length caller_binders) [])
+        else caller_binders in
 
     let subst = List.fold2 (fun m x y -> match x with | Some x -> Map.add (x.v.ppname.idText) y m | None -> m) 
                            Map.empty

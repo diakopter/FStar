@@ -42,16 +42,27 @@ type live (#a:Type) (t:array a) (m:smem) =
   (refIsLive (reveal (asRef t)) m)
   /\ (Seq.length (lookupRef (reveal (asRef t)) m) >= gindex t + glength t)
 
+val gget: 
+  #a:Type -> t:array a -> 
+  i:nat ->
+  m:smem{ live t m /\ glength t > i } -> 
+  GTot (v:a{ v = Seq.index (lookupRef (reveal (asRef t)) m) (gindex t + i) })
+let gget t i m = Seq.index (lookupRef (reveal (asRef t)) m) (gindex t + i)
+  
+
 assume val create:
   a:Type -> len:nat -> 
   Mem (array a)
       (requires (fun m -> (isNonEmpty (st m)) ) )
       (ensures (fun m0 t m1 ->
 		  (isNonEmpty (st m0))
-		  /\ (not(contains (topRegion m0) (reveal (asRef t))))
-		  /\ (m1 = allocateInTopR (reveal (asRef t)) (Seq.create len (instanceOf a)) m0)
+		  /\ (isNonEmpty (st m1))
+		  /\ (allocatedInRegion (reveal (asRef t)) (topRegion m0) (topRegion m1) (instanceOf a))
+		  /\ (regionOf (reveal (asRef t)) = InStack (topRegionId m0) /\ (topRegionId m0 = topRegionId m1))
+		  /\ (Regions.tail m0 = Regions.tail m1)
 		  /\ (glength t = len)
 		  /\ (gindex t = 0)
+		  /\ (live t m1)
 		  ))
        (hide empty)
 (*
@@ -86,7 +97,9 @@ assume val upd:
 		(live t m1)
 		/\ (live t m0)
 		/\ (n < glength t)
-		/\ (Seq.Eq  (lookupRef (reveal (asRef t)) m1) (Seq.upd (lookupRef (reveal (asRef t)) m0) n v))))
+//		/\ (gget t n m1 = v)
+//		/\ (forall (i:nat{ i < glength t /\ i <> n }). gget t i m1 = gget t i m0)))
+		/\ (Seq.Eq  (lookupRef (reveal (asRef t)) m1) (Seq.upd (lookupRef (reveal (asRef t)) m0) (n+gindex t) v))))
     (only (reveal (asRef t)))
 (*
 let upd t n v =
@@ -104,9 +117,23 @@ assume val sub:
     (ensures (fun m t' -> 
 		(live t m)
 		/\ (n + len <= glength t)
-		/\ (t' = Array (reveal (asRef t)) (gindex t + n) len)))
+		/\ (t' = Array (reveal (asRef t)) (gindex t + n) len)
+		/\ (live t' m)))
+
 (*
 let sub t n len =
   let content = Array.content t in
   Array content (Array.start t + n) len
 *)
+
+type char = b:nat{ b < 256 }
+
+// For demonstration purposes
+assume val op_Hat_Bar : x:char -> y:char -> Tot (z:char)
+
+assume val xor_lemma:
+  x:char -> y:char -> 
+  Lemma
+    (requires (True))
+    (ensures ( (x ^| y) ^| y = x ))
+    [SMTPat (op_Hat_Bar x y)]

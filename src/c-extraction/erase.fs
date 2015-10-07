@@ -10,7 +10,8 @@ open FStar.Extraction.C.Util
 
 // Functions to be ignored
 // TODO : extend, complete ...
-let erase_default = ["Prims.erase"; "Prims.admit"; "Prims.cut"; "Prims.admitP"; "Prims.assert"; "Prims._assert"]
+let erase_default = ["Prims.erase"; "Prims.admit"; "Prims.cut"; "Prims.admitP"; "Prims.assert"; "Prims._assert";
+                     "RST.pushRegion"; "RST.popRegion"]
 
 // Effects to be erased
 let effects_to_erase = ["Prims.GTot"; "Prims.Lemma"]

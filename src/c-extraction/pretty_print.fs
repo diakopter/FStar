@@ -200,7 +200,10 @@ and typ_to_string x =
   | Typ_meta meta ->           Util.format1 "(Meta %s)" (meta|> meta_to_string)
   | Typ_btvar btv -> strBvd btv.v
     //Util.format2 "(%s:%s)" (strBvd btv.v) (kind_to_string x.tk)
-  | Typ_const v -> sli v.v //Util.format2 "%s:%s" (sli v.v) (kind_to_string x.tk)
+  | Typ_const v -> 
+    let s = sli v.v in
+    let s = if s = "nat" then "int" else s in
+    s
   | Typ_fun(binders, c) ->     Util.format2 "(%s -> %s)"  (binders_to_string " -> " binders) (comp_typ_to_string c)
   | Typ_refine(xt, f) ->       Util.format3 "%s:%s{%s}" (strBvd xt.v) (xt.sort |> typ_to_string) (f|> formula_to_string)
   | Typ_app(_, []) -> failwith "Empty args!"
@@ -571,7 +574,11 @@ let env:FStar.Tc.Env.env ref =
 let default_modules = ["Prims"; "FStar.Set"; "FStar.Heap"; "FStar.ST"; "FStar.All"]
 
 // Functions that are to be handled in a special way
-let special_funs = ["LSarray.upd"; "LSarray.get"; "LSarray.create"; "LSarray.sub"]  
+let special_funs = ["LSarray.upd"; "LSarray.get"; "LSarray.create"; "LSarray.sub";
+                    "RSTCombinators.scopedWhile1"; (* "RSTCombinators.scopedWhile"; "RSTCombinators.scopedWhile2"; *)
+                    "RST.ralloc"; "RST.halloc";
+                    "RST.memread"; "RST.memwrite";
+                    "LSarray.op_Hat_Bar" ]  
 
 
 // Useful regular expressions
@@ -586,12 +593,22 @@ let paren_regex_1 = new System.Text.RegularExpressions.Regex "[\(]([\w_.\s]+)[\)
 let pp_infix_prim_op o = Print.infix_prim_op_to_string o
 let pp_unary_prim_op o = Print.unary_prim_op_to_string o
 
+// TODO : parse and print the typ properly
 let pp_typ t = 
-    // TODO : maybe use a fully new type printing function
-    let s = FStar.Tc.Normalize.typ_norm_to_string !env t in
+    // Normalize type
+    let t_norm = FStar.Tc.Normalize.norm_typ [FStar.Tc.Normalize.Beta;FStar.Tc.Normalize.SNComp;FStar.Tc.Normalize.Unmeta] !env t in
+    
+    // Use native F* printing function (modified)
+    let s = typ_to_string t_norm in
+
+    // Remove refinements
     let s = refinement_regex.Replace(s, "$2") in
+
+    // TODO : decide whether tuples are to be supported or not
     let s = tuple2_regex.Replace(s, "_pair") in
     let s = ptr_regex.Replace(s, "$1*") in
+
+    // Remove undesirable parenthesis
     let tmp2 = ref s in
     let tmp = ref (paren_regex_1.Replace(s, "$1")) in
     while (!tmp <> !tmp2 ) do
@@ -600,18 +617,33 @@ let pp_typ t =
     done;
     let s = paren_regex_1.Replace(s, "$1") in
     let s = s.Replace(' ', '_') in
+
+    // TODO : needed ?
     let s = s.Replace("(", "") in
     let s = s.Replace(")", "") in   
+    
+    // Replace unit by void
+    let s = if s = "unit" then "void" else s in
+
+    // Prettify arrays
+    let s = if s.StartsWith "array_" then s.Substring(6) + "*" else s in
+
+    // Prettify pointers
+    let s = if s.StartsWith "lref_" then s.Substring(5) + "*" else s in
+
     s
 
+// Prints an lbname whether it is a bound variable or a lident
 let pp_lbname (n:lbname) : string = match n with | Inl bvd -> strBvd bvd | Inr lid -> sli lid
 
+// Prints Some if no implicit tag else None
 let pp_imp (s:string) imp =
     match imp with
     | Some Implicit
     | Some Equality -> None
     | _ -> Some s
 
+// Prints arguments if not implicit
 let rec pp_arg a =
     match a with
     | Inl a, imp -> pp_imp (pp_typ a) imp
@@ -623,15 +655,21 @@ and pp_args args =
     let args = List.fold (fun l a -> match pp_arg a with | None -> l | Some v -> l@[v]) [] args in
     String.concat ", " args
 
+// Prints an expression
 and pp_expr (expr:exp) : string =
     let e = Util.compress_exp expr in
     match e.n with
     | Exp_delayed _ -> "Impossible, delayed expression/\n"
     | Exp_meta(Meta_desugared(e, _)) -> pp_expr e 
     | Exp_uvar(uv, t) -> "Pretty printing for uvar not implemented yet\n" //uvar_e_to_string (uv, t)
-    | Exp_bvar bvv -> (strBvd bvv.v) //Util.format2 "%s : %s" (strBvd bvv.v) (typ_to_string bvv.sort)
+    | Exp_bvar bvv -> (strBvd bvv.v) 
     | Exp_fvar(fv, _) ->  fv.v.str.Replace(".", "_")
-    | Exp_constant c -> (c |> const_to_string)
+    | Exp_constant c -> 
+        // Print constants.
+        // TODO : special cases (unit already handled)
+        let s = const_to_string c in
+        let s = if s = "()" then " " else s in
+        s
     | Exp_abs(binders, e) -> "Lambda abstraction, should be inlined : " + (Util.format1 "%s" (Print.exp_to_string e)) + "\n"
     | Exp_app(e, args) -> 
       let lex = if !Options.print_implicits then None else reconstruct_lex expr in
@@ -667,7 +705,8 @@ and pp_expr (expr:exp) : string =
         | _ -> Util.format2 "%s %s;\n" (t |> pp_typ) (e|> pp_expr)
     end
   | Exp_let(lbs, e) -> Util.format2 "%s\n%s\n" (pp_lbs lbs) (e|> pp_expr)
-
+  
+// Prints letbindings
 and pp_lbs (lbs:letbindings) : string = 
     let lbs = snd lbs in
     let str = ref "" in
@@ -691,6 +730,24 @@ and pp_lbs (lbs:letbindings) : string =
                     | _ -> false
                 end
             | _ -> false in
+        let is_erased t =
+            match t.n with
+            | Typ_app(t', args) ->                
+                begin
+                    match t'.n with
+                    | Typ_const(ftvar) -> if ftvar.v.str.Contains "FStar.Ghost.erased" then true else false
+                    | _ -> false
+                end
+            | _ -> false in
+        let is_ref t =
+            match t.n with
+            | Typ_app(t', args) ->
+                begin 
+                    match t'.n with
+                    | Typ_const(ftvar) -> if ftvar.v.str.Contains "Lref.lref" then true else false
+                    | _ -> false
+                end
+            | _ -> false in
 
         let exp = bd.lbdef in
         let bdname = bd.lbname in
@@ -698,6 +755,14 @@ and pp_lbs (lbs:letbindings) : string =
         if is_unit typ then (
             str := !str + (Util.format1 "%s;\n" (pp_expr exp))
         )
+        else if is_erased typ then 
+            ()
+        else if is_ref typ then (
+            str := !str + (Util.format2 "%s _%s;\n" ((pp_typ typ).Replace("*", "")) (pp_lbname bdname));
+            str := !str + (Util.format2 "%s %s;\n" (pp_typ typ) (pp_lbname bdname));
+            str := !str + (Util.format2 "_%s = %s;\n" (pp_lbname bdname) (pp_expr exp));
+            str := !str + (Util.format2 "%s = &_%s;\n" (pp_lbname bdname) (pp_lbname bdname))
+            )
         else if is_datactor exp then (
             str := !str + (Util.format3 "%s %s = %s;\n" (pp_typ typ) (pp_lbname bdname) (pp_expr exp))
             )
@@ -720,6 +785,7 @@ and pp_lbs (lbs:letbindings) : string =
     done;
     !str
 
+// Prints an application with its arguments
 and pp_application (e:exp) (args:args) : string =
     match e.n with
     | Exp_fvar(fv, quals) -> 
@@ -731,8 +797,10 @@ and pp_application (e:exp) (args:args) : string =
                     | Data_ctor -> Util.format1 "{%s}" (pp_args args)
                     | _ -> 
                         // TODO : rather a failwith, record should not exist
+                        Printf.printf "Warning, Found unhandled qualifiers in Exp_fvar\n";
                         if List.exists (fun s -> fv.v.str.Contains s) Erasure.erase_default then ""
-                        else Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args)                 end 
+                        else Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args)
+                 end 
             | _ -> 
                 let lid = fv.v.str in
                 let v = List.tryFind (fun x  -> lid.Contains x) special_funs in
@@ -745,11 +813,11 @@ and pp_application (e:exp) (args:args) : string =
                                 let t = match ty with | Inl x, _ -> pp_typ x | _ -> failwith "expected a typ in pp_application" in
                                 Util.format2 "%s|%s" t (pp_arg' len)
                             end
-                        | _ -> failwith (Util.format1 "Unable to handle those argument for array declaration : %s" (pp_args args))
+                        | _ -> failwith (Util.format1 "Unable to handle those arguments for array declaration : %s" (pp_args args))
                     else if f = "LSarray.get" then
                         match args with 
                         | _::id::idx::_ -> Util.format2 "%s[%s]" (pp_arg' id) (pp_arg' idx)
-                        | _ -> failwith (Util.format1 "Unable to handle those argument for array access : %s" (pp_args args))
+                        | _ -> failwith (Util.format1 "Unable to handle those arguments for array access : %s" (pp_args args))
                     else if f = "LSarray.sub" then
                         match args with
                         | ty::id::idx::len::_ -> //Util.format2 "(%s + %s)" (pp_arg' id) (pp_arg' idx)
@@ -759,24 +827,69 @@ and pp_application (e:exp) (args:args) : string =
                                 print_string s; print_string "\n";
                                 s
                             end
-                        | _ -> failwith (Util.format1 "Unable to handle those argument for sub array : %s" (pp_args args))
+                        | _ -> failwith (Util.format1 "Unable to handle those arguments for sub array : %s" (pp_args args))
                     else if f = "LSarray.upd" then
                         match args with
                         | _::id::idx::v::_ -> Util.format3 "%s[%s] = %s" (pp_arg' id) (pp_arg' idx) (pp_arg' v)
-                        | _ -> failwith (Util.format1 "Unable to handle those argument for array write : %s" (pp_args args))
-                    else failwith "pp_application found an unknown special function"
+                        | _ -> failwith (Util.format1 "Unable to handle those arguments for array write : %s" (pp_args args))
+                    else if f = "RST.ralloc" || f = "RST.halloc" then
+                        match args with
+                        | _::v::_ -> Util.format1 " %s" (pp_arg' v)
+                        | _ -> failwith (Util.format1 "Unable to handle those arguments for ralloc : %s" (pp_args args))
+                    else if f = "RSTCombinators.scopedWhile1" then
+                        match args with 
+                        | ty::ctr::(Inr loop_cond, _)::_::_::(Inr body, _)::_ ->
+                            let while_skeleton = "while(%s){\n%s;\n}\n" in
+                            let while_body = match body.n with
+                                             | Exp_ascribed(e', _, _) ->
+                                                begin
+                                                    match e'.n with
+                                                    | Exp_abs(_,e'') -> pp_expr e''
+                                                    | _ -> failwith (Util.format1 "Expected a lambda for the body of the while loop ': %s" (tag_of_exp e')) 
+                                                end
+                                             | Exp_abs(_, e') -> pp_expr e'
+                                             | _ -> failwith (Util.format1 "Expected a lambda for the body of the while loop : %s" (tag_of_exp body)) in
+                            // TODO : substitute the binder with the counter in the condition
+                            let cond = match loop_cond.n with
+                                       | Exp_ascribed(e', _, _)-> 
+                                            begin
+                                                match e'.n with 
+                                                | Exp_abs(binders, e'') -> pp_expr e''
+                                                | _ -> failwith (Util.format1 "Expected a lambda for the loop condition ': %s" (tag_of_exp e'))
+                                            end
+                                       | Exp_abs(binder, e') -> pp_expr e'
+                                       | _ -> failwith (Util.format1 "Expected a lambda for the loop condition : %s" (tag_of_exp loop_cond)) in
+                            // TODO : fix the horible pointer hack
+                            Util.format2 while_skeleton (cond.Replace("ctr", "*ctr")) while_body
+                        | _ -> failwith (Util.format1 "Unable to handle those arguments for scopedWhile1 : %s " (pp_args args))
+                    else if f = "RST.memread" then
+                        match args with
+                        | ty::r::_ -> Util.format1 "*%s" (pp_arg' r)
+                        | _ -> failwith (Util.format1 "Unable to handle those arguments for memread : %s " (pp_args args))
+                    else if f = "RST.memwrite" then 
+                        match args with
+                        | ty::r::v::_ -> Util.format2 "*%s = %s" (pp_arg' r) (pp_arg' v)
+                        | _ -> failwith (Util.format1 "Unable to handle those arguments for memread : %s " (pp_args args))
+                    else if f = "LSarray.op_Hat_Bar" then
+                        match args with
+                        | x::y::_ -> Util.format2 "%s ^ %s" (pp_arg' x) (pp_arg' y)
+                        | _ -> failwith (Util.format1 "Unable to handle those arguments for xor : %s" (pp_args args))
+                    
+                    else failwith (Util.format1 "pp_application found an unhandled special function : %s" f)
+                    
                 | _ -> 
                     if List.exists (fun s -> fv.v.str.Contains s) Erasure.erase_default then ""
                     else Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args)
         end
     | _ -> Util.format2 "%s(%s)" (e|> pp_expr) (pp_args args)  
     
-
+// Returns the name of a binder
 let binder_name (b:binder) =
     match b with
     | Inl a, imp -> strBvd a.v
     | Inr a, imp -> strBvd a.v
 
+// Returns the type of a binder if it is an expression, fails otherwise
 let binder_type (b:binder) =
     match b with
     | Inl a, imp -> failwith "Got a kind, not good"
@@ -1109,7 +1222,7 @@ let pp_fun_decl lid t : string =
                         let res_typ = pp_typ t' in
                         Util.format3 "%s %s(%s)" res_typ (lid.str.Replace('.', '_')) (pp_fun_decl_args ", " binders)
                     | Comp c' -> 
-                        let res_typ = Print.typ_to_string c'.result_typ in
+                        let res_typ = pp_typ c'.result_typ in
                         Util.format3 "%s %s(%s)" res_typ (lid.str.Replace('.', '_')) (pp_fun_decl_args ", " binders)
                 )
                 | _ -> "" in

@@ -34,7 +34,7 @@ let rec extractSigElt (* (c:context) *)  (s:sigelt) : string (* context * list<m
         let str = str + "Sig_typ_abbrev printed : \n" in
         let str = str + Print.sigelt_to_string s + "\n" in
         print_string str;
-        str
+        "\n"
 
 
     | Sig_bundle(sigs, [ExceptionConstructor], _, _) -> 
@@ -44,7 +44,7 @@ let rec extractSigElt (* (c:context) *)  (s:sigelt) : string (* context * list<m
         let str = str + "Sig_bundle exception printed : \n" in
         let str = str + Print.sigelt_to_string s + "\n" in
         print_string str;
-        str
+        "\n"
 
 
     | Sig_bundle (sigs, _, _ ,_) -> 
