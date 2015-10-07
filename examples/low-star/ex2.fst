@@ -1,7 +1,7 @@
 (*--build-config
   options:--admit_fsi FStar.Set --admit_fsi FStar.Seq --verify_module Ex2 --z3timeout 10 --codegen C;
   variables:SST=../low-level;
-  other-files:classical.fst ext.fst set.fsi seq.fsi seqproperties.fst heap.fst st.fst all.fst list.fst listTot.fst listproperties.fst $SST/stack.fst $SST/listset.fst ghost.fst $SST/located.fst $SST/lref.fst $SST/regions.fst $SST/rst.fst $SST/sstCombinators.fst lsarray.fst
+  other-files:classical.fst ext.fst set.fsi seq.fsi seqproperties.fst heap.fst st.fst all.fst list.fst listTot.fst listproperties.fst $SST/stack.fst $SST/listset.fst ghost.fst $SST/located.fst $SST/lref.fst $SST/regions.fst $SST/rst.fst $SST/rstWhile.fst lsarray.fst
   --*)
 
 
@@ -16,7 +16,7 @@ open FStar.Set
 open FStar.Ghost
 open Regions
 open Stack
-open RSTCombinators
+open RSTWhile
 open LSarray
 
 (* Custom char type, for simplicity *)

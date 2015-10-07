@@ -575,7 +575,7 @@ let default_modules = ["Prims"; "FStar.Set"; "FStar.Heap"; "FStar.ST"; "FStar.Al
 
 // Functions that are to be handled in a special way
 let special_funs = ["LSarray.upd"; "LSarray.get"; "LSarray.create"; "LSarray.sub";
-                    "RSTCombinators.scopedWhile1"; (* "RSTCombinators.scopedWhile"; "RSTCombinators.scopedWhile2"; *)
+                    "RSTWhile.scopedWhile1"; (* "RSTWhile.scopedWhile"; "RSTWhile.scopedWhile2"; *)
                     "RST.ralloc"; "RST.halloc";
                     "RST.memread"; "RST.memwrite";
                     "LSarray.op_Hat_Bar" ]  
@@ -836,7 +836,7 @@ and pp_application (e:exp) (args:args) : string =
                         match args with
                         | _::v::_ -> Util.format1 " %s" (pp_arg' v)
                         | _ -> failwith (Util.format1 "Unable to handle those arguments for ralloc : %s" (pp_args args))
-                    else if f = "RSTCombinators.scopedWhile1" then
+                    else if f = "RSTWhile.scopedWhile1" then
                         match args with 
                         | ty::ctr::(Inr loop_cond, _)::_::_::(Inr body, _)::_ ->
                             let while_skeleton = "while(%s){\n%s;\n}\n" in

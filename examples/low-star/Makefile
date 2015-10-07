@@ -18,15 +18,16 @@ test: codegen demo
 # files immediately
 codegen: demo.fst
 	$(FSTAR) $^
+#	Broken, those files were removed
 	cp ../low-level/Located.ml .
 	cp ../low-level/Lref.ml .
-	cp ../low-level/SST.ml .
+	cp ../low-level/RST.ml .
 	cp ../low-level/Seq.ml .
 	cp ../low-level/SSTArray.ml .
 	cp ./ml/CSystem.ml ./ml/CBuffer.ml ./ml/Test.ml .
 
 SST_FILES=ListSet.ml Stack.ml FStar_FunctionalExtensionality.ml FStar_Ghost.ml Located.ml \
-	Lref.ml StackAndHeap.ml SST.ml Seq.ml SSTArray.ml SSTCombinators.ml
+	Lref.ml Regions.ml RST.ml Seq.ml RSTArray.ml RSTWhile.ml
 
 demo: $(SST_FILES) CBuffer.ml CSystem.ml Demo.ml Test.ml
 	make -C ../../runtime/allocator
@@ -41,7 +42,23 @@ verify: demo.fst
 	$(FSTAR) $^
 
 ### NB : only works using the c-extraction branch of F* ###
-test2: codegen2 demo2
+
+# First example (monomorphization)
+test1: codegen1
+
+codegen1: ex1.fst
+#	Because of excessive debugging information, not printing F* output
+	$(FSTAR) $^ > /dev/null
+	@echo
+	@echo "Verification was successful, testing compilation..."
+	@echo
+	gcc -c Ex1.c
+	@echo "Compilation went well"
+	@echo
+	@echo "Produced C code :"
+	@cat Ex1.c
+
+test2: codegen2
 
 codegen2: ex2.fst
 #	Because of excessive debugging information, not printing F* output
@@ -49,7 +66,7 @@ codegen2: ex2.fst
 	@echo
 	@echo "Verification was successful, compiling..."
 	@echo
-	gcc Ex2.c test2.c -o test2
+	gcc Ex2.c ./test/test2.c -o test2
 	@echo "123, not encrypted so far" > test2.txt
 	@echo
 	@echo "Created dummy file containing \" 123, not encrypted so far"
