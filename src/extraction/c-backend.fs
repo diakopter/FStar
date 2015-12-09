@@ -149,6 +149,39 @@ let infix_prim_ops = [
     ("op_Modulus"           , e_bin_prio_order , "%" );
 ]
 
+let infix_int_ops = [
+    ("add_byte"         , e_bin_prio_op1   , "+" );
+    ("mul_byte"         , e_bin_prio_op1   , "*" );
+    ("sub_byte"         , e_bin_prio_op1   , "-" );
+    ("div_byte"         , e_bin_prio_op1   , "/" );
+    ("mod_byte"         , e_bin_prio_eq    , "%" );
+    ("log_and_byte"     , e_bin_prio_eq    , "&");
+    ("log_or_byte"      , e_bin_prio_eq    , "|");
+    ("log_xor_byte"     , e_bin_prio_and   , "^");
+    ("shift_left_byte"  , e_bin_prio_or    , "<<");
+    ("shift_right_byte" , e_bin_prio_order , ">>");
+    ("add_std"         , e_bin_prio_op1   , "+" );
+    ("mul_std"         , e_bin_prio_op1   , "*" );
+    ("sub_std"         , e_bin_prio_op1   , "-" );
+    ("div_std"         , e_bin_prio_op1   , "/" );
+    ("mod_std"         , e_bin_prio_eq    , "%" );
+    ("log_and_std"     , e_bin_prio_eq    , "&");
+    ("log_or_std"      , e_bin_prio_eq    , "|");
+    ("log_xor_std"     , e_bin_prio_and   , "^");
+    ("shift_left_std"  , e_bin_prio_or    , "<<");
+    ("shift_right_std" , e_bin_prio_order , ">>");
+    ("add_wide"         , e_bin_prio_op1   , "+" );
+    ("mul_wide"         , e_bin_prio_op1   , "*" );
+    ("sub_wide"         , e_bin_prio_op1   , "-" );
+    ("div_wide"         , e_bin_prio_op1   , "/" );
+    ("mod_wide"         , e_bin_prio_eq    , "%" );
+    ("log_and_wide"     , e_bin_prio_eq    , "&");
+    ("log_or_wide"      , e_bin_prio_eq    , "|");
+    ("log_xor_wide"     , e_bin_prio_and   , "^");
+    ("shift_left_wide"  , e_bin_prio_or    , "<<");
+    ("shift_right_wide" , e_bin_prio_order , ">>");
+ ]
+
 (* -------------------------------------------------------------------- *)
 let prim_uni_ops = [
     ("op_Negation", "~");
@@ -156,6 +189,14 @@ let prim_uni_ops = [
     ("op_Bang","*")
 ]
 
+let int_uni_ops = [
+    ("neg_byte", "~");
+    ("log_not_byte", "-");
+    ("neg_std", "~");
+    ("log_not_std", "-");
+    ("neg_wide", "~");
+    ("log_not_wide", "-");
+]
 (* -------------------------------------------------------------------- *)
 let prim_types = []
 
@@ -171,10 +212,16 @@ let prim_constructors = [
 let is_prims_ns (ns : list<mlsymbol>) =
     ns = ["Prims"]
 
+// F* machine integer library
+let is_int_ns (ns : list<mlsymbol>) =
+    ns = ["Prims"]
+
 (* -------------------------------------------------------------------- *)
 let as_bin_op ((ns, x) : mlpath) =
     if is_prims_ns ns then
         List.tryFind (fun (y, _, _) -> x = y) infix_prim_ops
+    else if is_int_ns ns then
+        List.tryFind (fun (y, _, _) -> x = y) infix_int_ops
     else
         None
 
@@ -343,6 +390,7 @@ let rec string_of_ml_type (t:mlty) : string =
         begin
         let typ = match typ with
                 | "Prims.unit" -> "void"
+                | "Prims.bool" -> "int"
                 | "Prims.int" -> "int"
                 | "Prims.nat" -> "int"
                 | "Prims.pos" -> "int"
@@ -354,6 +402,7 @@ let rec string_of_ml_type (t:mlty) : string =
                 | "UInt.uint_wide" -> "wide"
                 | _ -> typ.Replace('.', '_') in
         let other_types = List.map string_of_ml_type typs in
+        let other_types = List.fold (fun l x -> if x = "void" then l else l@[x]) [] other_types in
         List.fold (fun s x -> s ^ x) "" (other_types@[typ])
         end
     | MLTY_Fun (t1, tag, t2) -> 
@@ -379,6 +428,14 @@ let string_of_union name u =
     let s = List.fold (fun s x -> s ^ (print_field x)) s u in
     s ^ "} content;\n}"
 
+let string_of_lib (x:string) : string = 
+    match x with
+    | "UInt.byte_to_limb" 
+    | "UInt.wide_to_limb"-> "(limb)"
+    | "UInt.byte_to_wide" 
+    | "UInt.limb_to_wide"-> "(wide)"
+    | "UInt.add_byte" -> ""
+
 let string_of_string (x:string) : string =
     let s = 
         match x with
@@ -389,6 +446,7 @@ let string_of_string (x:string) : string =
     let s = parse_int_regex.Replace(s, "$1") in
     // Replace ocaml namespaces with flag names
     let s = s.Replace(".", "_") in
+    let s = s.Replace(".", "_prime_") in
     let s = s.Replace("FStar_ST_read", "*") in
     s
 
@@ -692,7 +750,7 @@ let rec string_of_expr (currentModule : mlsymbol) (outer : level) (e : mlexpr) :
 
         // Handle returns
         let return_flag_init = !return_flag in
-        return_flag := is_deepest_let body;
+        return_flag := Yes; //is_deepest_let body;
 
         let body' = string_of_expr currentModule (min_op_prec, NonAssoc) body in
         return_flag := return_flag_init;
@@ -785,9 +843,14 @@ and  string_of_uniop currentModule p e1  : string =
 and string_of_pattern (currentModule : mlsymbol) (pattern : mlpattern) : string =
     match pattern with
     | MLP_Wild     -> "default:"
-    | MLP_Const  c -> concat1 ["case "; (string_of_mlconstant c); ":"]
-    | MLP_Var    x -> concat1 ["case "; (fst x); ":"]
-
+    | MLP_Const  c -> 
+        let s = string_of_mlconstant c in
+        if s.StartsWith("_") then "default:"
+        else concat1 ["case "; (string_of_mlconstant c); ":"]
+    | MLP_Var    x -> 
+        let s = fst x in
+        if s.StartsWith("_") then "default:"
+        else concat1 ["case "; (fst x); ":"]
     | MLP_Record (path, fields) -> "Backend error : pattern matching on records not supported"
 //        let for1 (name, p) = concat1 [(ptsym currentModule  (path, name)); "="; string_of_pattern currentModule p] in
 //        cbracket (concat2 ("; ") (List.map for1 fields))
@@ -1038,7 +1101,7 @@ let doc_of_mod1 (currentModule : mlsymbol) (m : mlmodule1) =
             let name, ids, body = decl in
             let dtype_name = currentModule ^ "_" ^ ptsym_of_symbol name in
             let s = match body with
-            | Some (MLTD_Abbrev ty) -> "typedef " ^ (string_of_ml_type ty) ^ " " ^ (dtype_name)
+            | Some (MLTD_Abbrev ty) -> concat1 ["typedef"; (string_of_ml_type ty); (dtype_name); ";"]
             | Some (MLTD_Record r) -> 
                 let declaration = "typedef struct " ^ (dtype_name) ^ " " ^ (dtype_name) in
                 let body = "struct " ^ (dtype_name) ^ (string_of_record r) in
