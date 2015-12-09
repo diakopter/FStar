@@ -184,7 +184,8 @@ and meta_e_to_string = function
     | Data_app -> "Data_app"
     | Sequence -> "Sequence"
     | Primop   -> "Primop"
-    | MaskedEffect -> "MaskedEffect"
+    | Masked_effect -> "Masked_effect"
+    | Meta_smt_pat -> "Meta_smt_pat"
 
 (* This function prints the type it gets as argument verbatim.
    For already type-checked types use the typ_norm_to_string
@@ -416,8 +417,10 @@ and meta_to_string x = match x with
   | Meta_refresh_label(t, _, _) -> Util.format1 "(refresh) %s" (typ_to_string t)
   | Meta_labeled(t, l, _, _) -> Util.format2 "(labeled \"%s\") %s" l (typ_to_string t)
   | Meta_named(_, l) -> sli l
-  | Meta_pattern(t,ps) -> Util.format2 "{:pattern %s} %s" (args_to_string ps) (t |> typ_to_string)
+  | Meta_pattern(t,ps) -> Util.format2 "{:pattern %s} %s" (pats_to_string ps) (t |> typ_to_string)
   | Meta_slack_formula(t1, t2, _) -> Util.format2 "%s /\ %s" (formula_to_string t1) (formula_to_string t2)
+
+and pats_to_string ps = ps |> List.map (fun e -> e |> List.map arg_to_string |> String.concat "; ") |> String.concat " \/ "
 
 and kind_to_string x = match (compress_kind x).n with
   | Kind_lam _ -> failwith "Impossible"

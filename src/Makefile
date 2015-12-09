@@ -10,7 +10,7 @@ ABSYN_SRC=$(addprefix absyn/, $(ABSYN))
 FORMAT=format.fsi format.fs
 FORMAT_SRC=$(addprefix format/, $(FORMAT))
 
-EXTRACTION=ml-syntax.fs env.fs util.fs codegen.fsi codegen.fs extracttyp.fs extractexp.fs extractmod.fs
+EXTRACTION=ml-syntax.fs env.fs util.fs codegen.fsi codegen.fs c-backend.fsi c-backend.fs extracttyp.fs extractexp.fs extractmod.fs 
 EXTRACTION_SRC=$(addprefix extraction/, $(EXTRACTION))
 
 CEXTRACTION=pretty_print.fs c-syntax.fs c-extracttyp.fs c-extractmod.fs transform.fs
@@ -65,13 +65,13 @@ else
 RUNTIME = mono
 endif
 
-FSLYDIR := VS/packages/FsLexYacc.6.0.3
-FSYACC  := $(RUNTIME) $(FSLYDIR)/bin/fsyacc.exe
-FSLEX   := $(RUNTIME) $(FSLYDIR)/bin/fslex.exe
+FSLYDIR := VS/packages/FsLexYacc.6.1.0
+FSYACC  := $(RUNTIME) $(FSLYDIR)/build/fsyacc.exe
+FSLEX   := $(RUNTIME) $(FSLYDIR)/build/fslex.exe
 
 # --------------------------------------------------------------------
 .PHONY: all z3_x86 z3_x64 wc clean tidy boot ocaml
-.PHONY: msbuild msbuild-clean
+.PHONY: msbuild msbuild-clean nuget-restore nuget-clean
 
 # --------------------------------------------------------------------
 all: $(BIN)/fstar.exe
@@ -86,7 +86,17 @@ z3-x64:
 	cp $(BIN)/z3.x64.dll $(BIN)/z3.dll
 
 # --------------------------------------------------------------------
-msbuild:
+
+nuget-restore:
+	$(RUNTIME) VS/.nuget/NuGet.exe restore VS/FStar.sln
+
+nuget-clean:
+	rm -r VS/packages
+
+$(FSYACC) $(FSLEX): nuget-restore
+
+# --------------------------------------------------------------------
+msbuild: nuget-restore
 	$(MAKE) -C VS install-packages
 	$(MSBUILD) VS/FStar.sln
 
@@ -94,11 +104,11 @@ msbuild-clean:
 	$(MSBUILD) /t:clean VS/FStar.sln
 
 # --------------------------------------------------------------------
-parser/parse.fs: parser/parse.fsy
+parser/parse.fs: parser/parse.fsy $(FSYACC)
 	$(MAKE) -C VS install-packages
 	$(FSYACC) --module FStar.Parser.Parse $<
 
-parser/lex.fs: parser/lex.fsl
+parser/lex.fs: parser/lex.fsl $(FSLEX)
 	$(MAKE) -C VS install-packages
 	$(FSLEX) --unicode $<
 
@@ -175,7 +185,7 @@ BOOT_TCFILES=tcenv.fsi tcenv.fs recheck.fs normalize.fsi normalize.fs errors.fs 
 BOOT_TC=$(addprefix tc/, $(BOOT_TCFILES))
 BOOT_FORMATFILES=format.fsi formatml.fs
 BOOT_FORMAT=$(addprefix format/, $(BOOT_FORMATFILES))
-BOOT_EXTRACTIONFILES=ml-syntax.fs env.fs util.fs codegen.fsi codegen.fs extracttyp.fs extractexp.fs extractmod.fs
+BOOT_EXTRACTIONFILES=ml-syntax.fs env.fs util.fs codegen.fsi codegen.fs c-backend.fsi c-backend.fs extracttyp.fs extractexp.fs extractmod.fs
 BOOT_EXTRACTION=$(addprefix extraction/, $(BOOT_EXTRACTIONFILES))
 
 BOOT_MAIN=fstar/fstar.fs
@@ -185,7 +195,7 @@ ADMITTED_MODULES=System System.IO System.Text System.Diagnostics System.Collecti
 ADMITS=$(addprefix --admit_fsi , $(ADMITTED_MODULES))
 
 ocaml: $(BOOT_ALL)
-	../bin/fstar.exe --eager_inference --MLish --lax --fs_typ_app --odir ocaml-output $(FSTAROPTS) --codegen OCaml $(ADMITS) $^
+	../bin/fstar.exe --use_native_int --eager_inference --MLish --lax --fs_typ_app --odir ocaml-output $(FSTAROPTS) --codegen OCaml $(ADMITS) $^
 
 ocaml-test: ocaml boot-ocaml
 
@@ -196,14 +206,14 @@ boot-ocaml:
 # Bootstrapping in F#
 # --------------------------------------------------------------------
 
-FS_SUPPORT_LIBS=prims.fs st.fs all.fs option.fs
+FS_SUPPORT_LIBS=native_int/prims.fs st.fs all.fs option.fs
 FSTAR_SUPPORT_LIBS=char.fsi char.fs string.fsi string.fs list.fsi list.fs util.fsi util.fs platform.fsi platform.fs bytes.fsi bytes.fs range.fsi range.fs getoptsimple.fsi getoptsimple.fs version.fsi version.fs unionfind.fsi unionfind.fs
 BOOT_FS_BASE=FStar.Options.fs
 BOOT_FS_SYNTAX=FStar.Absyn.Syntax.fs FStar.Absyn.Const.fs FStar.Absyn.Visit.fs FStar.Absyn.Util.fs FStar.Absyn.Print.fs FStar.Absyn.SSyntax.fs
 BOOT_FS_TC=FStar.Tc.Env.fs FStar.Tc.Recheck.fs FStar.Tc.Normalize.fs FStar.Tc.Errors.fs FStar.Tc.Rel.fs FStar.Tc.Util.fs FStar.Tc.Tc.fs 
 BOOT_FS_PARSER=FStar.Parser.AST.fs parseutil.fs parse.fs FStar.Parser.Lexhelp.fs lex.fs FStar.Parser.DesugarEnv.fs FStar.Parser.Desugar.fs parseit.fs FStar.Parser.Driver.fs
 BOOT_FS_TOSMT=FStar.ToSMT.Term.fs FStar.ToSMT.Z3.fs FStar.ToSMT.SplitQueryCases.fs FStar.ToSMT.Encode.fs
-BOOT_FS_EXTRACTION=FStar.Extraction.ML.Syntax.fs FStar.Extraction.ML.Env.fs FStar.Extraction.ML.Util.fs FStar.Extraction.ML.Code.fs FStar.Extraction.ML.ExtractTyp.fs FStar.Extraction.ML.ExtractExp.fs FStar.Extraction.ML.ExtractMod.fs
+BOOT_FS_EXTRACTION=FStar.Extraction.ML.Syntax.fs FStar.Extraction.ML.Env.fs FStar.Extraction.ML.Util.fs FStar.Extraction.ML.Code.fs FStar.Extraction.ML.CBackend.fs FStar.Extraction.ML.ExtractTyp.fs FStar.Extraction.ML.ExtractExp.fs FStar.Extraction.ML.ExtractMod.fs
 BOOT_FS_FILES=FSharp.Format.fs $(BOOT_FS_BASE) $(BOOT_FS_SYNTAX) $(BOOT_FS_TC) $(BOOT_FS_PARSER) $(BOOT_FS_TOSMT) $(BOOT_FS_EXTRACTION) FStar.FStar.fs
 
 boot-fsharp: fsharp-output fs plain-fs-files fsharp-output/fstar.exe 
@@ -212,7 +222,7 @@ fsharp-output/fstar.exe: $(addprefix ../lib/fs/, $(FS_SUPPORT_LIBS)) $(addprefix
 	$(FSC) --nowarn:0025 -o $@ $(BASELIBS) $(OTHERFLAGS) $^
 
 fs: $(BOOT_ALL) 
-	../bin/fstar.exe --eager_inference --MLish --lax --fs_typ_app --odir fsharp-output $(FSTAROPTS) --codegen FSharp $(ADMITS) $^
+	../bin/fstar.exe --use_native_int --eager_inference --MLish --lax --fs_typ_app --odir fsharp-output $(FSTAROPTS) --codegen FSharp $(ADMITS) $^
 
 fsharp-output: 
 	mkdir -p fsharp-output
@@ -232,14 +242,16 @@ clean-boot-fs:
 # Testing
 # --------------------------------------------------------------------
 
-test:   clean $(BIN)/fstar.exe ocaml-test
+test:   clean $(BIN)/fstar.exe ocaml-test regressions
+
+regressions:
 	make -C ../lib
 	make -C ../examples
 	make -C ../examples/hello ocaml
 	make -C ../contrib/Platform/ml/
 	make -C ../contrib/CoreCrypto/ml/ all test
-	make -C ../examples/crypto rpc-test
-	make -C ../examples/crypto cnt-test
+	make -C ../examples/crypto clean rpc-test cnt-test
+	#make -C ../examples/wysteria a.out distclean  //AR: cannot compile Crypto.ml, as it uses assume type
 
 test.net: clean $(BIN)/fstar.exe boot
 	make -C ../examples

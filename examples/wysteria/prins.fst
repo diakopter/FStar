@@ -15,6 +15,7 @@ type prin =
   | Evelyn
   | Fred
 
+(* TODO: FIXME: we should not write this type *)
 val p_cmp: prin -> prin -> Tot bool
 let p_cmp p1 p2 =
        if p1 = Alice   then true
@@ -26,7 +27,7 @@ let p_cmp p1 p2 =
 
 type eprins = ordset prin p_cmp
 
-type prins = s:ordset prin p_cmp{not (s = empty)}
+type prins = s:ordset prin p_cmp{size s > 0}
 
 val ps_cmp: ps1:eprins -> ps2:eprins -> Tot bool (decreases (size ps1))
 let rec ps_cmp ps1 ps2 =

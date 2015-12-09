@@ -1,4 +1,7 @@
-
+(*--build-config
+options:--admit_fsi FStar.Set;
+other-files: set.fsi;
+--*)
 module FStar.Heap
 #set-options "--initial_fuel 0 --max_fuel 0 --initial_ifuel 1 --max_ifuel 1"
 open FStar.Set
@@ -45,7 +48,6 @@ assume ContainsConcat:forall (a:Type) (h1:heap) (h2:heap) (a:ref a).       {:pat
                       contains (concat h1 h2) a == (contains h1 a || contains h2 a)
 
 type On (r:set aref) (p:(heap -> Type)) (h:heap) = p (restrict h r)
-(*opaque type fresh (h:heap) (refs:set aref)       = (forall (a:Type) (a:ref a).{:pattern (contains h a)} mem (Ref a) refs ==> not(contains h a))*)
 opaque type fresh (refs:set aref) (h0:heap) (h1:heap) =
   (forall (a:Type) (a:ref a).{:pattern (contains h0 a)} mem (Ref a) refs ==> not(contains h0 a) /\ contains h1 a)
 opaque logic type modifies (mods:set Heap.aref) (h:heap) (h':heap) =

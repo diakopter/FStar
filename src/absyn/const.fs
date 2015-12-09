@@ -34,10 +34,15 @@ let uint8_lid  = pconst  "uint8"
 let int64_lid  = pconst  "int64"
 let float_lid  = pconst  "float"
 let exn_lid    = pconst  "exn"
+let list_lid   = pconst  "list"
+let pattern_lid = pconst "pattern"
 let precedes_lid = pconst "Precedes"
 let lex_t_lid    = pconst "lex_t"
 let lexcons_lid  = pconst "LexCons"
 let lextop_lid   = pconst "LexTop"
+let smtpat_lid   = pconst "SMTPat"
+let smtpatT_lid  = pconst "SMTPatT"
+let smtpatOr_lid = pconst "SMTPatOr"
 
 let int32_lid  = p2l ["FStar"; "Int32"; "int32"]
 let int31_lid  = p2l ["FStar"; "Int31"; "int31"]
@@ -85,6 +90,7 @@ let assume_lid      = pconst  "_assume"
 let assert_lid      = pconst  "_assert"
 let list_append_lid = p2l ["FStar"; "List"; "append"]
 let strcat_lid      = p2l ["Prims"; "strcat"]
+let let_in_typ      = p2l ["Prims"; "Let"]
 
 (* Primitive operators *)
 let op_Eq              = pconst "op_Equality"

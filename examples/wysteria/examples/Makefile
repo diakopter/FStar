@@ -1,0 +1,2 @@
+api:
+	$(FSTAR) wysteria.fst

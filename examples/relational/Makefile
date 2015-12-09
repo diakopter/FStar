@@ -1,4 +1,4 @@
-FSTAR = ../../bin/fstar.exe
+FSTAR = ../../bin/fstar.exe $(OTHERFLAGS)
 
 all: noninterference\
 		 sample_examples\
@@ -7,9 +7,11 @@ all: noninterference\
 		 smart_meter\
 		 spdz\
 		 cache\
-		 ro\
 		 projection_test\
-		 ifc_compiler
+		 monotone\
+		 ifc\
+		 ifc_compiler\
+#		 ro 									Fails because of #405 (only works with z3.4.4.0)
 
 noninterference:
 	$(FSTAR) noninterference.fst
@@ -37,6 +39,12 @@ cache:
 
 ifc_compiler:
 	$(FSTAR) ifc_compiler.fst
+
+ifc:
+	$(FSTAR) ifc.fst
+
+monotone::
+	$(FSTAR) monotone.fst
 
 projection_test:
 	$(FSTAR) projection_test.fst

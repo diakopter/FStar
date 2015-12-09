@@ -59,8 +59,10 @@ let delta_norm_eff =
 
 let translate_eff g l : e_tag =
     let l = delta_norm_eff g l in
-    if lid_equals l Const.effect_PURE_lid  || lid_equals l Const.effect_GHOST_lid (*TODO : review the last disjunct*)
+    if lid_equals l Const.effect_PURE_lid 
     then E_PURE
+    else if lid_equals l Const.effect_GHOST_lid
+    then E_GHOST
     else E_IMPURE
 
 (*generates inp_1 -> E_PURE (inp_2 -> ...  E_PURE (inp_n -> f out)) *)
@@ -447,11 +449,13 @@ let rec extractSigElt (c:context) (s:sigelt) : context * list<mlmodule1> =
         let c, tyAbDecls = Util.fold_map extractTypeAbbrev c abbs in
         (c, [MLM_Ty (indDecls@tyAbDecls)])
 
-    | Sig_tycon (_, _, _, _, _, quals, _) ->
+    | Sig_tycon (l, bs, k, _, _, quals, r) ->
         //Util.print_string ((Print.sigelt_to_string s)^"\n");
          if quals |> List.contains Assumption  &&
          not (quals |> Util.for_some (function Projector _ | Discriminator _ -> true | _ -> false))
-         then extractSigElt c (Sig_bundle([s], [Assumption], [], Util.range_of_sigelt s))
+         then let kbs, _ = Util.kind_formals k in 
+              let se = Sig_typ_abbrev(l, bs@kbs, mk_Kind_type, Tc.Recheck.t_unit, quals, r) in
+              extractSigElt c se 
          else c,[]
 
     | _ -> c, []

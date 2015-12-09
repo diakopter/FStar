@@ -39,7 +39,6 @@ features and bug fixes.
 
 On Macs you can also build and install the latest F\* release using Homebrew:
 
-        $ brew tap homebrew/science
         $ brew install fstar
 
 For building and installing the latest F\* sources from GitHub (the master branch)
@@ -92,23 +91,16 @@ you to skip directly to step 3 and build F* with just an OCaml compiler.
     - Install the Visual F# Tools (v3.0 or 3.1) from Microsoft
       (e.g. by clicking the "Get Visual F# Tools for Visual Studio 2013"
        link [here](https://msdn.microsoft.com/en-us/vstudio/hh388569.aspx))
-
+  - Run the `src/VS/nuget-restore.bat` script before openting the solution for the first time. F* depends upon NuGet packages that are incompatible with Visual Studio's internal invocation of NuGet's restore feature.
   - Using Visual Studio, open `src/VS/FStar.sln` and build the solution
     (in the menus: Build > Build Solution).
 
-**Note:** on Windows you need to build F\* using Visual Studio
-  (building in Cygwin is not supported currently; `make -C src`
-  succeeds but produces a broken binary:
+**Note:** on Windows if you want to build F\* using F# you need use
+  Visual Studio (building using `fsc.exe` in Cygwin is not supported
+  currently; `make -C src` succeeds but produces a broken binary:
   https://github.com/FStarLang/FStar/issues/159)
 
-**Note:** if the Visual Studio build fails because `parse.fs` and
-  `lex.fs` are not found because of a mysterious issue, try closing
-  and reopening the solution and rebuilding until things magically
-  work (yes, we know it's strange) or do a `make -C src` for getting
-  these files generated before rebuilding with Visual Studio for
-  getting a proper binary:
-  https://github.com/FStarLang/FStar/issues/325 and
-  https://github.com/FStarLang/FStar/issues/73
+**Note:** If Visual Studio fails to open one or more projects, the problem is likely that the NuGet package cache hasn't been restored. You must either exit Visual Studio to restore the cache (using the `src/VS/nuget-restore.bat` script), or restart Visual Studio after having restored the cache. Otherwise, F* may not successfully build (or correctly build).
 
 #### On Linux or Mac OS X using Mono ####
 
@@ -210,7 +202,7 @@ special `flexlink` technology for this. See `contrib/CoreCrypto/ml` and
 
 ## Runtime dependency: Z3 SMT solver ##
 
-To use F* for verification you need a Z3 4.4.0 (or 4.3.2) binary.
+To use F* for verification you need a Z3 4.4.0 binary.
 Our binary packages include that already in `bin`, but if you compile
 F* from sources you need to get a Z3 binary yourself and add it to
 your `PATH`. We recommend you use the 4.4.0 binaries here:
@@ -223,8 +215,9 @@ https://github.com/Z3Prover/z3/releases/tag/z3-4.4.0
 
 0. Bootstrap the compiler in OCaml using the instructions above
 
-1. Make sure you have the Z3 binary in your `$PATH` or
+1. Make sure you have the Z3 4.4.0 binary in your `$PATH` or
    in the `$FSTAR_HOME/bin` directory
+   (please make sure it's precisely this version!)
 
 2. Run the following command:
 
@@ -232,5 +225,10 @@ https://github.com/Z3Prover/z3/releases/tag/z3-4.4.0
 
 3. Run the testing of binary packages (described above)
 
+4. At the end of the release, please remember to update the
+   links at: https://www.fstar-lang.org/#download and the
+   version on https://en.wikipedia.org/wiki/F*_(programming_language)
+   and https://en.wikipedia.org/wiki/Proof_assistant
+
 **Note**: to create the package successfully you will need tools like
-Madoko, make, git, zip, etc installed.
+make, git, Madoko, latex, zip, etc installed.

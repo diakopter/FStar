@@ -101,7 +101,7 @@ and cflags =
   | DECREASES of exp
 and uvar_t = Unionfind.uvar<uvar_basis<typ>>
 and meta_t =
-  | Meta_pattern of typ * list<arg>
+  | Meta_pattern of typ * list<list<arg>>
   | Meta_named of typ * lident                               (* Useful for pretty printing to keep the type abbreviation around *)
   | Meta_labeled of typ * string * Range.range * bool        (* Sub-terms in a VC are labeled with error messages to be reported, used in SMT encoding *)
   | Meta_refresh_label of typ * option<bool> * Range.range   (* Add the range to the label of any labeled sub-term of the type *)
@@ -128,7 +128,8 @@ and meta_source_info =
   | Data_app
   | Sequence
   | Primop                                  (* ... add more cases here as needed for better code generation *)
-  | MaskedEffect
+  | Masked_effect
+  | Meta_smt_pat
 and fv_qual =
   | Data_ctor
   | Record_projector of lident                  (* the fully qualified (unmangled) name of the field being projected *)

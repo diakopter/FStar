@@ -1,44 +1,54 @@
 include ../Makefile.include
 
-all: api sinterpreter tinterpreter theory codegen distclean
+all:
+	make api
+	make theory
+	(cd examples/fstar_main; ../../$(FSTAR) traces.fst)
+	make codegen SMCIF=examples/fstar_main/psipaperiface.fsi SMCMAIN=examples/fstar_main/psipapermain.fst
+	make distclean
+
+EXAMPLES_DIR=./examples
 
 api:
-	$(FSTAR) wysteria.fst
-	$(FSTAR) mill1.fst
-	$(FSTAR) mill2.fst
-	$(FSTAR) mill3.fst
-	$(FSTAR) mill4.fst
-	$(FSTAR) mill5.fst
-	$(FSTAR) gps.fst
-	$(FSTAR) median.fst
-
-sinterpreter:
-	$(FSTAR) sinterpreter.fst
-
-tinterpreter:
-	$(FSTAR) tinterpreter.fst
+	make -C examples api FSTAR='../$(FSTAR)'
 
 theory:
 	$(FSTAR) theory.fst
 
-OCAMLOPT=ocamlfind ocamlopt -thread -package batteries -linkpkg -g -w -8
+OUTPUT_DIR=./ocaml-output
 
+CONTRIB=$(FSTAR_HOME)/contrib
+
+CODEGEN_FLAGS=--admit_fsi FStar.Set --admit_fsi FStar.String --admit_fsi FStar.Seq --admit_fsi Ffibridge --admit_fsi Runtime --admit_fsi Prog --admit_fsi FStar.IO\
+              --admit_fsi FStar.Squash --admit_fsi Smciface --admit_fsi Hashtable --codegen-lib Platform --codegen-lib CoreCrypto --codegen OCaml --odir $(OUTPUT_DIR)\
+              --use_native_int --__temp_no_proj PSemantics --__temp_no_proj SecServer
+
+FSTAR_LIB_FILES=classical.fst ext.fst set.fsi heap.fst st.fst all.fst seq.fsi seqproperties.fst ghost.fst squash.fsti\
+                listTot.fst list.fst listproperties.fst ordset.fsi ordset.fst ordmap.fsi ordmap.fst io.fsti string.fsi hashtable.fsi\
+
+INTERPRETER_FILES=prins.fst ast.fst ffibridge.fsi sem.fst psem.fst rtheory.fst $(CONTRIB)/Platform/fst/Bytes.fst\
+                  runtime.fsi print.fst ckt.fst $(CONTRIB)/CoreCrypto/fst/CoreCrypto.fst ../crypto/sha1.fst crypto.fst\
+                  interpreter.fst sec_server.fst examples/ffi.fst prog.fsi
+
+#SMCIF and SMCMain are set from command line invocation of make
 codegen:
-	$(FSTAR) --admit_fsi FStar.OrdSet --admit_fsi FStar.OrdMap --admit_fsi FStar.Set\
-	         --admit_fsi FFI --admit_fsi Runtime --admit_fsi FStar.IO --codegen OCaml\
-                 ghost.fst listTot.fst ordset.fsi ordmap.fsi classical.fst set.fsi heap.fst st.fst\
-                 all.fst io.fsti prins.fst ast.fst print.fst ffi.fsi sem.fst sinterpreter.fst runtime.fsi tinterpreter.fst\
-		 sec_server.fst main.fst
+	cp $(SMCIF) smciface.fsi
+	cp $(SMCMAIN) smc_main.fst
+	$(FSTAR) $(CODEGEN_FLAGS) $(EXTERNAL_FLAGS) $(FSTAR_LIB_FILES) $(INTERPRETER_FILES) smciface.fsi smc_main.fst
 
-a.out: codegen
-	cp $(FSTAR_HOME)/lib/ml/prims.ml .
-	cp $(FSTAR_HOME)/lib/ml/FStar_All.ml .
-	cp $(FSTAR_HOME)/lib/ml/FStar_ST.ml .
-	cp $(FSTAR_HOME)/lib/ml/FStar_IO.ml .
-	$(OCAMLOPT) prims.ml FStar_ST.ml FStar_All.ml FStar_OrdSet.ml FStar_OrdMap.ml FStar_IO.ml \
-	            AST.ml Print.ml FFI.ml Semantics.ml SourceInterpreter.ml Runtime.ml TargetInterpreter.ml SecServer.ml Main.ml -o a.out
+# codegen:
+# 	$(FSTAR) --admit_fsi FStar.Set --admit_fsi FStar.String --admit_fsi FStar.Seq --admit_fsi Ffibridge --admit_fsi Runtime --admit_fsi Prog --admit_fsi FStar.IO --admit_fsi FStar.Squash\
+#                  --codegen-lib Platform --codegen-lib CoreCrypto --codegen OCaml --odir $(OUTPUT_DIR) --use_native_int --__temp_no_proj PSemantics --__temp_no_proj SecServer\
+#                  classical.fst ext.fst set.fsi heap.fst st.fst all.fst seq.fsi seqproperties.fst ghost.fst squash.fsti\
+#                  listTot.fst list.fst listproperties.fst ordset.fsi ordset.fst ordmap.fsi ordmap.fst io.fsti string.fsi\
+#                  prins.fst ast.fst ffibridge.fsi sem.fst psem.fst rtheory.fst $(CONTRIB)/Platform/fst/Bytes.fst runtime.fsi print.fst ckt.fst $(CONTRIB)/CoreCrypto/fst/CoreCrypto.fst ../crypto/sha1.fst crypto.fst interpreter.fst sec_server.fst examples/ffi.fst prog.fsi main.fst 
+
+a.out:
+	make -C $(OUTPUT_DIR) a.out
+
 clean:
-	rm -f *.cmi *.cmx *.o *.exe a.out 
+	make -C $(OUTPUT_DIR) clean
 
 distclean:
-	rm -f AST.ml prims.ml FStar_List_Tot.ml FStar_Ghost.ml FStar_All.ml FStar_Classical.ml FStar_Heap.ml FStar_ST.ml FStar_IO.ml Prins.ml Print.ml SecServer.ml TargetInterpreter.ml Semantics.ml SourceInterpreter.ml Main.ml *.cmi *.cmx *.o *.exe a.out 
+	rm -f smciface.fsi smc_main.fst
+	make -C $(OUTPUT_DIR) distclean

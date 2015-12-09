@@ -1,4 +1,5 @@
 
+open Prims
 type doc =
 | Doc of Prims.string
 
@@ -72,13 +73,11 @@ let combine = (fun _55_26 docs -> (match (_55_26) with
 | Doc (sep) -> begin
 (let select = (fun _55_30 -> (match (_55_30) with
 | Doc (d) -> begin
-(match ((d = "")) with
-| true -> begin
+if (d = "") then begin
 None
-end
-| false -> begin
+end else begin
 Some (d)
-end)
+end
 end))
 in (let docs = (FStar_List.choose select docs)
 in Doc ((FStar_String.concat sep docs))))

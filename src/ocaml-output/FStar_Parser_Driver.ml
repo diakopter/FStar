@@ -1,4 +1,5 @@
 
+open Prims
 let print_error = (fun msg r -> (let _113_6 = (let _113_5 = (FStar_Range.string_of_range r)
 in (FStar_Util.format2 "ERROR %s: %s\n" _113_5 msg))
 in (FStar_Util.print_string _113_6)))
@@ -66,8 +67,7 @@ end
 (Prims.raise (FStar_Absyn_Syntax.Error ((msg, r))))
 end))
 
-let parse_file = (fun env fn -> (match ((is_cache_file fn)) with
-| true -> begin
+let parse_file = (fun env fn -> if (is_cache_file fn) then begin
 (let full_name = (let _113_49 = (let _113_48 = (let _113_47 = (let _113_46 = (FStar_Options.get_fstar_home ())
 in (Prims.strcat _113_46 "/"))
 in (Prims.strcat _113_47 FStar_Options.cache_dir))
@@ -77,8 +77,7 @@ in (let m = (let _113_50 = (FStar_Util.get_oreader full_name)
 in (FStar_Absyn_SSyntax.deserialize_modul _113_50))
 in (let _113_51 = (FStar_Parser_Desugar.add_modul_to_env m env)
 in (_113_51, (m)::[]))))
-end
-| false -> begin
+end else begin
 (match ((FStar_Parser_ParseIt.parse (FStar_Util.Inl (fn)))) with
 | FStar_Util.Inl (FStar_Util.Inl (ast)) -> begin
 (FStar_Parser_Desugar.desugar_file env ast)
@@ -92,9 +91,9 @@ end
 in (FStar_All.pipe_left FStar_Util.print_string _113_52))
 in (FStar_All.exit 1))
 end)
-end))
+end)
 
-let read_build_config = (fun file -> (FStar_Parser_ParseIt.read_build_config file))
+let read_build_config = (fun file -> (FStar_Parser_ParseIt.read_build_config file true))
 
 
 

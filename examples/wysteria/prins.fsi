@@ -13,9 +13,9 @@ val p_cmp: f:(prin -> prin -> Tot bool){total_order prin f}
 
 type eprins = ordset prin p_cmp
 
-type prins = s:ordset prin p_cmp{not (s = empty)}
+type prins = s:ordset prin p_cmp{size s > 0}
 
-val ps_cmp: ps1:eprins -> ps2:eprins -> Tot bool
+val ps_cmp: ps1:eprins -> ps2:eprins -> Tot bool (decreases (size ps1))
 
 assume Ps_cmp_is_total_order: total_order prins ps_cmp
 

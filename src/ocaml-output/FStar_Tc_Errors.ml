@@ -1,4 +1,5 @@
 
+open Prims
 let exhaustiveness_check = "Patterns are incomplete"
 
 let subtyping_failed = (fun env t1 t2 x -> (let _99_10 = (FStar_Tc_Normalize.typ_norm_to_string env t2)
@@ -23,13 +24,11 @@ let verification_errs = (FStar_Util.mk_ref [])
 
 let add_errors = (fun env errs -> (let errs = (FStar_All.pipe_right errs (FStar_List.map (fun _34_14 -> (match (_34_14) with
 | (msg, r) -> begin
-(let r = (match ((r = FStar_Absyn_Syntax.dummyRange)) with
-| true -> begin
+(let r = if (r = FStar_Absyn_Syntax.dummyRange) then begin
 (FStar_Tc_Env.get_range env)
-end
-| false -> begin
+end else begin
 r
-end)
+end
 in (r, msg))
 end))))
 in (let n_errs = (FStar_List.length errs)
