@@ -216,6 +216,9 @@ let is_prims_ns (ns : list<mlsymbol>) =
 let is_int_ns (ns : list<mlsymbol>) =
     ns = ["Prims"]
 
+let is_fstar_lib (m:string) =
+    m = "Prims" || m.StartsWith("FStar_")
+
 (* -------------------------------------------------------------------- *)
 let as_bin_op ((ns, x) : mlpath) =
     if is_prims_ns ns then
@@ -355,6 +358,8 @@ let tag_of_expr e =
 // Flags & state
 type flag = | Yes | No | Unknown
 
+let counter = ref 0 // counter to issue var names
+
 let return_flag = ref Unknown // true if return statement is to be printed
 let end_of_block_flag = ref Unknown // true if the last statement of a block e.g. 'if' or 'switch' block is reached
 let application_flag = ref Unknown  // true if the next var to be printed is a function (and thus the module name has to 
@@ -364,14 +369,18 @@ let current_type = ref MLTY_Top // if a cast is required
 let current_module = ref "" // name of the current module (to append to function names, datacons etc.)
 let current_match = ref "" // String of the inner most match being processed
 let last_bound = ref "" // var name to which a 'match' of a 'if' is bound : let v = match ...
-
+let is_void_function = ref false // indicates if "return" statement is unnecessary
 
 let map_datacon_to_field_num : Map<string, int> ref = ref (Map.empty)
 let unions : List<string> ref = ref (List.empty)
+let modules : List<string> ref = ref (List.empty)
 
 (* -------------------------------------------------------------------- *)
 // Regular expressions 
 let parse_int_regex = new System.Text.RegularExpressions.Regex "\(Prims\.parse_int \"([0-9a-fA-FxX]+)\"\)"
+let parse_int_regex2 = new System.Text.RegularExpressions.Regex "\(UInt\.to_limb \"([0-9a-fA-FxX]+)\"\)"
+let parse_int_regex3 = new System.Text.RegularExpressions.Regex "\(UInt\.to_wide \"([0-9a-fA-FxX]+)\"\)"
+
 let projector_regex1 = new System.Text.RegularExpressions.Regex "___([\w_]+)____([0-9]+)"
 let projector_regex2 = new System.Text.RegularExpressions.Regex "([\w_\.]+)____([\w_]+)____([0-9]+)[\s]+(\([\w\s_]+\)|[\w]+)"
 let projector_regex3 = new System.Text.RegularExpressions.Regex "____([\w_]+)____([0-9]+)[\s]+(\([\w\s_]+\))"
@@ -380,6 +389,7 @@ let projector_regex3 = new System.Text.RegularExpressions.Regex "____([\w_]+)___
 // Printing functions
 let string_of_mlident (ident:mlident) : string =
     let sym, _ = ident in
+    let sym = sym.Replace("'", "_prime_") in
     sym
 
 let rec string_of_ml_type (t:mlty) : string =
@@ -400,6 +410,8 @@ let rec string_of_ml_type (t:mlty) : string =
                 | "FStar.ST.ref" -> "*"
                 | "UInt.uint_std" -> "limb"
                 | "UInt.uint_wide" -> "wide"
+                | "UInt.limb" -> "limb"
+                | "UInt.wide" -> "wide"
                 | _ -> typ.Replace('.', '_') in
         let other_types = List.map string_of_ml_type typs in
         let other_types = List.fold (fun l x -> if x = "void" then l else l@[x]) [] other_types in
@@ -442,11 +454,13 @@ let string_of_string (x:string) : string =
         | _ -> x in
     // Prepend the module name to a function is necessary
     let s = if !application_flag = Yes && not(s.Contains(".")) then !current_module ^ "_" ^ s else s in
-    // Replace the "Prims.parse_int" calls
+    // Replace the "Prims.parse_int" calls and similar calls
     let s = parse_int_regex.Replace(s, "$1") in
+    let s = parse_int_regex2.Replace(s, "(limb)$1") in
+    let s = parse_int_regex3.Replace(s, "(wide)$1") in
     // Replace ocaml namespaces with flag names
     let s = s.Replace(".", "_") in
-    let s = s.Replace(".", "_prime_") in
+    let s = s.Replace("'", "_prime_") in
     let s = s.Replace("FStar_ST_read", "*") in
     s
 
@@ -466,9 +480,15 @@ let strip_from_paren (s:string) =
     then s.Substring(1, len-2)
     else s
 
+let print_headers () =
+    //let rec last l = match l with | [] -> "#include fstarlib.h\"" | e::[] -> concat ["#include \""; e; ".h\""] | _::tl -> last tl in
+    concat2 new_line ("#include \"fstarlib.h\"":: (List.map (fun s -> concat ["#include \""; s; ".h\""]) (!modules)))
+    //last !modules
+
 (* -------------------------------------------------------------------- *)
 // Environment maintaining functions 
-
+let get_new_var_name () = 
+    concat ["auto__"; string !counter]
 
 (* -------------------------------------------------------------------- *)
 // Utility functions, not optimized
@@ -544,6 +564,11 @@ let rec is_if_or_match (m:mlexpr) =
     | MLE_Seq(li) -> is_if_or_match (List.hd (List.rev li))
     | _ -> false
 
+let is_void (m:mllb) = 
+    match snd (m.mllb_tysc) with
+    | MLTY_Fun (ty, tag, ty2) -> if string_of_ml_type ty2 = "void" then true else false
+    | _ -> false
+
 (* -------------------------------------------------------------------- *)
 let rec doc_of_mltype' (currentModule : mlsymbol) (outer : level) (ty : mlty) =
     match ty with
@@ -595,8 +620,11 @@ and doc_of_mltype (currentModule : mlsymbol) (outer : level) (ty : mlty) =
 (* -------------------------------------------------------------------- *)
 let rec string_of_expr (currentModule : mlsymbol) (outer : level) (e : mlexpr) : string =
     let mk_last_statement (d:string) = 
-        if !return_flag = Yes then concat1 ["return "; d; ";"] else
-        if !end_of_block_flag = Yes then concat1 [!last_bound; "="; d; ";"] else d in
+        match !return_flag with 
+        | Yes -> if !is_void_function then concat1 [d; ";"] else concat1 ["return "; d; ";"] 
+        | _ -> match !end_of_block_flag with
+               | Yes -> concat1 [!last_bound; "="; d; ";"] 
+               | _ -> d in
     match e.expr with
     | MLE_Coerce (e, t, t') ->
         "\nBackend error in doc_of_expr : MLE_Coerce not handled \n"
@@ -680,7 +708,7 @@ let rec string_of_expr (currentModule : mlsymbol) (outer : level) (e : mlexpr) :
         let end_of_block_flag_init = !end_of_block_flag in
 
         // Different ways to handle it depending on the nature of the enclosed expression
-        let doc  = string_of_lets currentModule (rec_, false, lets) in
+        let doc  = snd (string_of_lets currentModule (rec_, false, lets)) in
 
        // Check nature of the body
         return_flag := return_flag_init;
@@ -696,8 +724,11 @@ let rec string_of_expr (currentModule : mlsymbol) (outer : level) (e : mlexpr) :
 
     | MLE_App (e, args) -> begin
         let return_flag_init = !return_flag in
-        return_flag := Unknown;
-        let doc = 
+        let end_of_block_flag_init = !end_of_block_flag in
+        return_flag := No;
+        end_of_block_flag := No;
+
+        let fun_args = 
 //            Console.WriteLine (" " ^ tag_of_expr e);
 
             match e.expr, args with
@@ -720,8 +751,9 @@ let rec string_of_expr (currentModule : mlsymbol) (outer : level) (e : mlexpr) :
                 let args = List.map (string_of_expr currentModule  (e_app_prio, IRight)) args in
                 let args = paren (concat2 (", ") args) in
                 concat1 [e; args] in
-        let doc = replace_projectors doc in
+        let doc = replace_projectors fun_args in
         return_flag := return_flag_init;
+        end_of_block_flag := end_of_block_flag_init;
         mk_last_statement doc
     end
 
@@ -793,22 +825,29 @@ let rec string_of_expr (currentModule : mlsymbol) (outer : level) (e : mlexpr) :
         if_statement
 
     | MLE_Match (cond, pats) ->
+        // Disable the "return" flag when printing the condition of the switch
+        let return_flag_init = !return_flag in
+        return_flag := No;
         let cond' = string_of_expr currentModule  (min_op_prec, NonAssoc) cond in
+        return_flag := return_flag_init;
         let cond_type = string_of_ml_type (cond.ty) in
+        // Check if tagged union
+        let cond' = if List.contains cond_type !unions then (paren cond' ^ ".tag") else cond' in
+        let new_var = get_new_var_name () in
+        let decl = concat1 [cond_type; new_var; "="; cond'; ";"] in
 
         // Current type being matched on
         let current_match_init = !current_match in
         current_match := cond_type;
 
-        let cond' = if List.contains cond_type !unions then (paren cond' ^ ".tag") else cond' in
         let pats = List.map (string_of_branch currentModule (string_of_ml_type cond.ty)) pats in
-        let doc  = concat1 ["switch"; paren cond'; "{"] :: pats @ ["}"] in
-        let doc  = concat2 new_line doc in
+        let doc  = concat1 ["switch"; paren new_var; "{"] :: pats @ ["}"] in
+        let doc  = concat2 new_line (decl::doc) in
 
         // Reset
         current_match := current_match_init;
 
-        paren doc
+        doc
 
     | MLE_Raise (exn, []) ->
         // TODO
@@ -918,18 +957,44 @@ and string_of_branch (currentModule : mlsymbol) (ty:string) ((p, cond, e) : mlbr
     branch
 
 (* -------------------------------------------------------------------- *)
-and string_of_lets (currentModule : mlsymbol) (rec_, top_level, lets) =
+and string_of_lets (currentModule : mlsymbol) (rec_, top_level, lets) : string * string =
 
     let print_decl (lb:mllb) = 
         match lb.mllb_tysc with
         | _, MLTY_Fun (ty, tag, ty2) -> "" //((string_of_ml_type ty) ^ " | " ^ (string_of_ml_type ty2)
                                         //^ " | " ^ (string_of_mlident lb.mllb_name))
         | _ -> 
-            if not(top_level) then ((string_of_ml_type (snd lb.mllb_tysc)) ^ " " ^ (string_of_mlident lb.mllb_name) ^ ";") 
-            else "" in
+            // No declaration when binding unit
+            if string_of_ml_type (snd lb.mllb_tysc) = "void" then ""
+            // If top_level, the declaration is handled at the same time as the body for constants, not in this function
+            else if top_level then ""
+            else ((string_of_ml_type (snd lb.mllb_tysc)) ^ " " ^ (string_of_mlident lb.mllb_name) ^ ";") in
+            
+    let print_decl_prototypes (lb:mllb) =
+        match lb.mllb_tysc with
+        | _, MLTY_Fun (ty, tag, ty2) ->
+        begin
+            match lb.mllb_def.expr with
+            | MLE_Fun (ids, _) ->
+                let bvar_annot x xt =
+                    match xt with 
+                    | Some xxt when (string_of_ml_type xxt = "void") -> None
+                    | Some xxt -> Some (concat1 [string_of_ml_type xxt; x])
+                    | _ -> Some "void*" in
+
+                let ids  = List.fold (fun l ((x, _),xt) -> match bvar_annot x (Some xt) with | Some v -> l@[v] | _ -> l) [] ids in
+                let vars = paren (concat2 (", ") ids) in
+                     concat [(string_of_ml_type ty2); " "; currentModule; "_"; (string_of_mlident lb.mllb_name); vars; ";"]
+            | _ -> "" 
+        end
+        | _ -> concat1 ["const"; string_of_ml_type (snd lb.mllb_tysc); concat [currentModule; "_"; string_of_mlident lb.mllb_name];  "="; 
+                                        string_of_expr currentModule (min_op_prec, NonAssoc) lb.mllb_def; ";"] in
 
     let decls = concat2 new_line (List.map print_decl lets) in
     let print_expr (lb:mllb) = 
+        // Sets whether the function return "unit" so as to not print the "return" statement in that case
+        if top_level then is_void_function := is_void lb;
+
         match lb.mllb_tysc with
         // Case of top level functions
         | _, MLTY_Fun (ty, tag, ty2) -> concat [(string_of_ml_type ty2); " ";
@@ -937,8 +1002,7 @@ and string_of_lets (currentModule : mlsymbol) (rec_, top_level, lets) =
                                                 string_of_expr currentModule (min_op_prec, NonAssoc) lb.mllb_def] 
         | _ -> 
             // Top level constants
-            if top_level then concat1 ["const"; string_of_ml_type (snd lb.mllb_tysc); string_of_mlident lb.mllb_name;  "="; 
-                                        string_of_expr currentModule (min_op_prec, NonAssoc) lb.mllb_def; ";"]
+            if top_level then ""
             // If the expression is a 'match' of a 'if'
             else if is_if_or_match lb.mllb_def then
                 // Name of the identifier to which to bind the result of the if of the match
@@ -958,14 +1022,34 @@ and string_of_lets (currentModule : mlsymbol) (rec_, top_level, lets) =
             
                 let current_type_init = !current_type in
                 current_type := snd lb.mllb_tysc;
-                let body = concat   [(string_of_mlident lb.mllb_name ^ " = "); 
-                                            string_of_expr currentModule (min_op_prec, NonAssoc) lb.mllb_def;
-                                            ";"] in
+                let body = 
+                    if string_of_ml_type (snd lb.mllb_tysc) = "void" 
+                    then concat [string_of_expr currentModule (min_op_prec, NonAssoc) lb.mllb_def; ";"] // "unit" case
+                    else 
+                        begin
+                            // Name of the identifier to wich to bind the result of the expression
+                            let last_bound_init = !last_bound in
+                            let end_of_block_init = !end_of_block_flag in
+                            last_bound := string_of_mlident lb.mllb_name;
+                            end_of_block_flag := Unknown;
+                            end_of_block_flag := is_last_in_block lb.mllb_def;
+                            // Print expression
+                            let expr = concat[string_of_expr currentModule (min_op_prec, NonAssoc) lb.mllb_def] in
+                            let expr = strip_from_paren expr in
+                            last_bound := last_bound_init;
+                            end_of_block_flag := end_of_block_init;
+                            expr
+//                            concat [(string_of_mlident lb.mllb_name ^ " = ");                              // regular case
+//                                 string_of_expr currentModule (min_op_prec, NonAssoc) lb.mllb_def; ";"]
+                        end in
                 current_type := current_type_init;
                 body 
+
             in
+
+    let prototypes = if top_level then concat2 new_line (List.map print_decl_prototypes lets) else "" in
     let exprs = concat2 new_line (List.map print_expr lets) in
-    concat2 new_line (decls::exprs::[])
+    prototypes, concat2 new_line (decls::exprs::[])
 //    let for1 {mllb_name=name; mllb_tysc=tys; mllb_def=e} =
 //        let e   = doc_of_expr currentModule  (min_op_prec, NonAssoc) e in
 //        let ids = [] in //TODO: maybe extract the top-level binders from e and print it alongside name
@@ -1085,13 +1169,15 @@ and doc_of_sig (currentModule : mlsymbol) (s : mlsig) =
 
 (* -------------------------------------------------------------------- *)
 let doc_of_mod1 (currentModule : mlsymbol) (m : mlmodule1) =
+    // reset counter for variable names
+    counter := 0;
     match m with
     | MLM_Exn (x, []) ->
-        text "Backend error : exceptions are not handled"
+        text "Backend error : exceptions are not handled", text ""
         //reduce1 [text "exception"; text x]
 
     | MLM_Exn (x, args) ->
-        text "Backend error : exceptions are not handled"
+        text "Backend error : exceptions are not handled", text ""
 //        let args = List.map (doc_of_mltype currentModule  (min_op_prec, NonAssoc)) args in
 //        let args = parens (combine (text " * ") args) in
 //        reduce1 [text "exception"; text x; text "of"; args]
@@ -1101,11 +1187,12 @@ let doc_of_mod1 (currentModule : mlsymbol) (m : mlmodule1) =
             let name, ids, body = decl in
             let dtype_name = currentModule ^ "_" ^ ptsym_of_symbol name in
             let s = match body with
-            | Some (MLTD_Abbrev ty) -> concat1 ["typedef"; (string_of_ml_type ty); (dtype_name); ";"]
+            | Some (MLTD_Abbrev ty) -> 
+                concat1 ["typedef"; (string_of_ml_type ty); (dtype_name); ";"], ""
             | Some (MLTD_Record r) -> 
                 let declaration = "typedef struct " ^ (dtype_name) ^ " " ^ (dtype_name) in
                 let body = "struct " ^ (dtype_name) ^ (string_of_record r) in
-                declaration ^ ";\n" ^ body ^ ";\n"
+                concat [declaration; ";"],  concat [body; ";"]
             | Some (MLTD_DType dt) ->
                 begin
                     match dt with
@@ -1119,7 +1206,7 @@ let doc_of_mod1 (currentModule : mlsymbol) (m : mlmodule1) =
                         let declaration = "typedef struct " ^ (dtype_name) ^ " " ^ (currentModule) ^ "_" ^ ctor_id in
                         let declaration2 = "typedef struct " ^ (dtype_name) ^ " " ^ (dtype_name)  in
                         let body = "struct " ^ (dtype_name) ^ (string_of_datacon (ctor_id, ctor_typ)) in
-                        declaration ^ ";\n" ^ declaration2 ^ ";\n" ^ body ^ ";\n"
+                        concat [declaration; ";\n"; declaration2; ";"], concat [body; ";"]
                     | _ ->
                         let ctr = ref 0 in
                         let full_name ctor_name = (dtype_name) ^ "_" ^ ctor_name in
@@ -1138,11 +1225,12 @@ let doc_of_mod1 (currentModule : mlsymbol) (m : mlmodule1) =
                         let declarations = List.fold (fun s x -> s ^ (print_declaration x)) "" dt in
                         let bodies = List.fold (fun s x -> s ^ (print_body x)) "" dt in
                         let union = "struct " ^ dtype_name ^ string_of_union currentModule dt ^ ";\n" in
-                        (declarations ^ bodies ^ union)
+                        declarations, concat [bodies; union]
                 end
                             
-            | None -> "" in
-            text s in
+            | None -> "", "" in
+            text (fst s), text (snd s) in
+
         let print_union_decl (decl:mlsymbol * mlidents * option<mltybody>) =
             let name, _, body = decl in
             let dtype_name = currentModule ^ "_" ^ ptsym_of_symbol name in
@@ -1162,7 +1250,9 @@ let doc_of_mod1 (currentModule : mlsymbol) (m : mlmodule1) =
             
             match body with 
             | Some(MLTD_DType ([(ctor_id, typs)])) -> 
-                text (concat ["int "; currentModule; "_is_"; ctor_id; "("; dtype_name; " blah){\n return 1;\n}\n"])
+                let prototype = text "" in
+                let body = text (concat ["int "; currentModule; "_is_"; ctor_id; "("; dtype_name; " blah){\n return 1;\n}\n"]) in
+                prototype, body
             | Some (MLTD_DType (l)) -> 
                 let ctr = ref 0 in
                 let print_discr (ctor_id,li) =
@@ -1170,8 +1260,10 @@ let doc_of_mod1 (currentModule : mlsymbol) (m : mlmodule1) =
                     ctr := !ctr + 1;
                     let body = concat ["return ((blah.tag == "; string !ctr; ") ? (1) : (0));\n}\n"] in
                     concat [head; body] in
-                text (concat (List.map print_discr l))
-            | _ -> text "" in
+                let prototype = text "" in 
+                let body = text (concat (List.map print_discr l)) in
+                prototype, body
+            | _ -> text "", text "" in
 
         let print_projectors (decl:mlsymbol * mlidents * option<mltybody>) =
             let name, ids, body = decl in
@@ -1187,7 +1279,9 @@ let doc_of_mod1 (currentModule : mlsymbol) (m : mlmodule1) =
                     let body = concat ["return x.field_"; string !ctr; ";\n}\n"] in
                     concat [head; body] in
                 let projectors = List.map print_proj typs in
-                concat2 new_line projectors
+                let prototypes = "" in
+                let bodies = concat2 new_line projectors in
+                prototypes, bodies
             | Some (MLTD_DType (l)) -> 
                 let print_project (ctor_id, typs) =
                     let ctr = ref 0 in
@@ -1200,36 +1294,44 @@ let doc_of_mod1 (currentModule : mlsymbol) (m : mlmodule1) =
                     let projectors = List.map print_proj typs in
                     concat2 new_line projectors in
                 let all_projectors = List.map print_project l in
-                concat2 new_line all_projectors
-            | _ -> "" in
-            text s in
+                let prototypes = "" in
+                let bodies = concat2 new_line all_projectors in
+                prototypes, bodies 
+            | _ -> "", "" in
+            text (fst s), text (snd s) in
 
-            
-        let declarations = (List.map print_union_decl decls) @ (List.map (print_decl) decls) @ (List.map print_discriminators decls) @ (List.map print_projectors decls) in
+        let prototypes = (List.map print_union_decl decls) 
+                         @ (List.map (fun x -> fst (print_decl x)) decls) 
+                         @ (List.map (fun x -> fst (print_discriminators x)) decls) 
+                         @ (List.map (fun x -> fst (print_projectors x)) decls) in 
+        let declarations = (List.map (fun x -> snd (print_decl x)) decls) 
+                            @ (List.map (fun x -> snd (print_discriminators x)) decls) 
+                            @ (List.map (fun x -> snd (print_projectors x)) decls) in
 
-        combine hardline declarations
+        combine hardline prototypes, combine hardline declarations
 
         //doc_of_mltydecl currentModule decls
 
     | MLM_Let (rec_, lets) ->
-        if (is_projector m || is_instance_of m || is_mk_record m) then text ""
-        else text (string_of_lets currentModule (rec_, true, lets))
-
+        if (is_projector m || is_instance_of m || is_mk_record m) then text "", text ""
+        else 
+            let s = string_of_lets currentModule (rec_, true, lets) in
+            text (fst s), text (snd s)
     | MLM_Top e ->
+        text "",
         reduce [text "int main(){\n"; text (string_of_expr currentModule (min_op_prec, NonAssoc) e); text "\n}"]
-//        reduce1 [
-//            text "let"; text "_"; text "=";
-//            doc_of_expr currentModule  (min_op_prec, NonAssoc) e
-//        ]
+
 
 (* -------------------------------------------------------------------- *)
 let doc_of_mod (currentModule : mlsymbol) (m : mlmodule) =
     // Add current module to state variables
     current_module := currentModule;
+    if not (is_fstar_lib currentModule) then modules := !modules@[currentModule];
 
     let docs = List.map (doc_of_mod1 currentModule) m in
-    let docs = List.map (fun x -> reduce [x; hardline; hardline]) docs in
-    reduce docs
+    let docs_h = List.map (fun x -> reduce [fst x; hardline; hardline]) docs in
+    let docs_c = List.map (fun x -> reduce [snd x; hardline; hardline]) docs in
+    reduce docs_h, reduce docs_c
 
 (* -------------------------------------------------------------------- *)
 let rec doc_of_mllib_r (MLLib mllib) =
@@ -1247,39 +1349,34 @@ let rec doc_of_mllib_r (MLLib mllib) =
              | Some s -> cat s hardline);
             reduce sub;
             cat tail hardline;
-        ]
-    and for1_mod istop (x, sigmod, MLLib sub) =
-        (*
-        let head = reduce1 (if Util.codegen_fsharp()
-                            then [text "module";  text x]
-                            else if not istop
-                            then [text "module";  text x; text "="; text "struct"]
-                            else []) in
-        let tail = if not istop
-                   then reduce1 [text "end"]
-                   else reduce1 [] in
-                   *)
-        let head = text "" in let tail = reduce1 [] in
+        ] in
+    let rec for1_mod istop (x, sigmod, MLLib sub) : doc * doc =
+        let head = text (print_headers ()) in let tail = reduce1 [] in
         let doc  = Option.map (fun (_, m) -> doc_of_mod x m) sigmod in
-        let sub  = List.map (for1_mod false)  sub in
-        let sub  = List.map (fun x -> reduce [x; hardline; hardline]) sub in
+        let sub'  = List.map (for1_mod false) sub in
+        let sub_h, sub_c = List.map fst sub', List.map snd sub' in
+        let sub_h  = List.map (fun x -> reduce [x; hardline; hardline]) sub_h in
+        let sub_c  = List.map (fun x -> reduce [x; hardline; hardline]) sub_c in
         let prefix = if Util.codegen_fsharp () then [cat (text "#light \"off\"") hardline] else [] in
-
-        reduce <| (prefix @ [
-            head;
-            hardline;
-            text "#include \"fstarlib.h\"";
-            hardline;
-            (match doc with
-             | None   -> empty
-             | Some s -> cat s hardline);
-            reduce sub;
-            cat tail hardline;
-        ])
+        let doc_h =  (reduce <| (prefix @ [
+                                hardline;
+                                (match doc with
+                                 | None   -> empty
+                                 | Some (s1, s2) -> cat s1 hardline);
+                                reduce sub_h;
+                                cat tail hardline;])) in
+        let doc_c = reduce <| (prefix @ [
+                                head;
+                                hardline;
+                                (match doc with
+                                 | None   -> empty
+                                 | Some (s1, s2) -> cat s2 hardline);
+                                reduce sub_c;
+                                cat tail hardline; ]) in
+        doc_h, doc_c
 
     in
-
-    let docs = List.map (fun (x,s,m) -> (x,for1_mod true (x,s,m))) mllib in
+    let docs = List.map (fun (x,s,m) -> let doc_h, doc_c = for1_mod true (x,s,m) in (x,doc_h, doc_c)) mllib in
     docs
 
 (* -------------------------------------------------------------------- *)
