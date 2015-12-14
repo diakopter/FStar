@@ -208,6 +208,10 @@ let prim_constructors = [
     ("Cons", "::");
 ]
 
+let backend_lib = [
+    "Bigint"
+]
+
 (* -------------------------------------------------------------------- *)
 let is_prims_ns (ns : list<mlsymbol>) =
     ns = ["Prims"]
@@ -217,7 +221,7 @@ let is_int_ns (ns : list<mlsymbol>) =
     ns = ["Prims"]
 
 let is_fstar_lib (m:string) =
-    m = "Prims" || m.StartsWith("FStar_")
+    m = "Prims" || m.StartsWith("FStar_") || List.contains m backend_lib
 
 (* -------------------------------------------------------------------- *)
 let as_bin_op ((ns, x) : mlpath) =
@@ -408,6 +412,8 @@ let rec string_of_ml_type (t:mlty) : string =
                 | "Prims.string" -> "char*"
                 | "Prims.Tuple2" -> "_tuple2"
                 | "FStar.ST.ref" -> "*"
+                | "FStar.Array.array" -> "*"
+                | "UInt.ulint" -> "int"
                 | "UInt.uint_std" -> "limb"
                 | "UInt.uint_wide" -> "wide"
                 | "UInt.limb" -> "limb"
@@ -772,11 +778,6 @@ let rec string_of_expr (currentModule : mlsymbol) (outer : level) (e : mlexpr) :
             | Some xxt -> Some (concat1 [string_of_ml_type xxt; x])
             | _ -> Some "void*" in
                 
-//            if Util.codegen_fsharp() //type inference in F# is not complete, particularly for field projections; so these annotations are needed
-//            then concat1 ["("; x ;
-//                          (match xt with | Some xxt -> concat1 [" : "; doc_of_mltype currentModule outer xxt] | _ -> "");
-//                          ")"]
-//            else x in
         let ids  = List.fold (fun l ((x, _),xt) -> match bvar_annot x (Some xt) with | Some v -> l@[v] | _ -> l) [] ids in
         let vars = paren (concat2 (", ") ids) in
 
@@ -831,23 +832,41 @@ let rec string_of_expr (currentModule : mlsymbol) (outer : level) (e : mlexpr) :
         let cond' = string_of_expr currentModule  (min_op_prec, NonAssoc) cond in
         return_flag := return_flag_init;
         let cond_type = string_of_ml_type (cond.ty) in
-        // Check if tagged union
-        let cond' = if List.contains cond_type !unions then (paren cond' ^ ".tag") else cond' in
-        let new_var = get_new_var_name () in
-        let decl = concat1 [cond_type; new_var; "="; cond'; ";"] in
 
-        // Current type being matched on
-        let current_match_init = !current_match in
-        current_match := cond_type;
+        // Check if the matching is occuring on unit if so skip the matching part
+        if cond_type = "void" then 
+            let _, _, body = List.hd pats in
+            // Entering a new block so trying out the end of block flag
+            let end_of_block_init = !end_of_block_flag in
+            end_of_block_flag := is_last_in_block e;
+            let return_flag_init = !return_flag in
+            return_flag := is_deepest_let e;
 
-        let pats = List.map (string_of_branch currentModule (string_of_ml_type cond.ty)) pats in
-        let doc  = concat1 ["switch"; paren new_var; "{"] :: pats @ ["}"] in
-        let doc  = concat2 new_line (decl::doc) in
+            let branch = concat1 [string_of_expr currentModule  (min_op_prec, NonAssoc) body; ";"] in
 
-        // Reset
-        current_match := current_match_init;
+            // Restore old flag
+            end_of_block_flag := end_of_block_init;
+            return_flag := return_flag_init;
+            branch
+        
+        else 
+            // Check if tagged union
+            let cond' = if List.contains cond_type !unions then (paren cond' ^ ".tag") else cond' in
+            let new_var = get_new_var_name () in
+            let decl = concat1 [cond_type; new_var; "="; cond'; ";"] in
 
-        doc
+            // Current type being matched on
+            let current_match_init = !current_match in
+            current_match := cond_type;
+
+            let pats = List.map (string_of_branch currentModule (string_of_ml_type cond.ty)) pats in
+            let doc  = concat1 ["switch"; paren new_var; "{"] :: pats @ ["}"] in
+            let doc  = concat2 new_line (decl::doc) in
+
+            // Reset
+            current_match := current_match_init;
+
+            doc
 
     | MLE_Raise (exn, []) ->
         // TODO
@@ -944,6 +963,8 @@ and string_of_branch (currentModule : mlsymbol) (ty:string) ((p, cond, e) : mlbr
     // Entering a new block so trying out the end of block flag
     let end_of_block_init = !end_of_block_flag in
     end_of_block_flag := is_last_in_block e;
+    let return_flag_init = !return_flag in
+    return_flag := is_deepest_let e;
 
     let branch = concat2 new_line [
         case;
@@ -953,6 +974,7 @@ and string_of_branch (currentModule : mlsymbol) (ty:string) ((p, cond, e) : mlbr
 
     // Restore old flag
     end_of_block_flag := end_of_block_init;
+    return_flag := return_flag_init;
 
     branch
 
@@ -1050,37 +1072,7 @@ and string_of_lets (currentModule : mlsymbol) (rec_, top_level, lets) : string *
     let prototypes = if top_level then concat2 new_line (List.map print_decl_prototypes lets) else "" in
     let exprs = concat2 new_line (List.map print_expr lets) in
     prototypes, concat2 new_line (decls::exprs::[])
-//    let for1 {mllb_name=name; mllb_tysc=tys; mllb_def=e} =
-//        let e   = doc_of_expr currentModule  (min_op_prec, NonAssoc) e in
-//        let ids = [] in //TODO: maybe extract the top-level binders from e and print it alongside name
-//        //let f x = x
-//        //let f = fun x -> x
-//        //i.e., print the latter as the former
-//        let ids = List.map (fun (x, _) -> text x) ids in
-//        let ty_annot =
-//            if Util.codegen_fsharp () && (rec_ || top_level) //needed for polymorphic recursion and to overcome incompleteness of type inference in F#
-//            then match tys with
-//                    | (_::_, _) -> //except, emitting binders for type variables in F# sometimes also requires emitting type constraints; which is not yet supported
-//                      text ""
-//                    | ([], ty) ->
-//                      let ty = doc_of_mltype currentModule (min_op_prec, NonAssoc) ty in
-//                      reduce1 [text ":"; ty]
-////                      let ids = List.map (fun (x, _) -> text x) ids in
-////                      begin match ids with
-////                        | [] -> reduce1 [text ":"; ty]
-////                        | _ ->  reduce1 [text "<"; combine (text ", ") ids; text ">"; text ":"; ty]
-////                      end
-//            else text "" in
-//        reduce1 [text (idsym name); reduce1 ids; ty_annot; text "="; e] in
-//
-//    let letdoc = if rec_ then reduce1 [text "let"; text "rec"] else text "let" in
-//
-//    let lets = List.map for1 lets in
-//    let lets = List.mapi (fun i doc ->
-//        reduce1 [(if i = 0 then letdoc else text "and"); doc])
-//        lets in
-//
-//    combine hardline lets
+
 
 (* -------------------------------------------------------------------- *)
 let doc_of_mltydecl (currentModule : mlsymbol) (decls : mltydecl) =
