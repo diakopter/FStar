@@ -52,10 +52,10 @@ type env = {
   range          :Range.range;                  (* the source location of the term being checked *)
   curmodule      :lident;                       (* Name of this module *)
   gamma          :list<binding>;                (* Local typing environment and signature elements *)
-  gamma_cache    :Util.smap<cached_elt>;
+  gamma_cache    :Util.smap<cached_elt>;        (* Memo table for the local environment *)
   modules        :list<modul>;                  (* already fully type checked modules *)
   expected_typ   :option<typ>;                  (* type expected by the context *)
-  sigtab         :list<Util.smap<sigelt>>;      (* a dictionary of long-names to sigelts *)
+  sigtab         :Util.smap<sigelt>;            (* a dictionary of long-names to sigelts *)
   is_pattern     :bool;                         (* is the current term being checked a pattern? *)
   instantiate_imp:bool;                         (* instantiate implicit arguments? default=true *)
   effects        :effects;                      (* monad lattice *)
@@ -123,6 +123,7 @@ val lookup_definition      : delta_level -> env -> lident -> option<(univ_names 
 val try_lookup_effect_lid  : env -> lident -> option<term>
 val lookup_effect_lid      : env -> lident -> term
 val lookup_effect_abbrev   : env -> universe -> lident -> option<(binders * comp)>
+val norm_eff_name          : (env -> lident -> lident)
 val lookup_projector       : env -> lident -> int -> lident
 val current_module         : env -> lident
 val is_projector           : env -> lident -> bool

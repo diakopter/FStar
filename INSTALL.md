@@ -192,6 +192,12 @@ Steps 2 and 3 below require a working OCaml (4.02.2 or later) setup.
    install Cygwin -- it will just launch Cygwin's setup.exe with the right set
    of packages pre-checked, to make sure you have everything you need.
 
+1. Open the Cygwin terminal and fake the installation of OPAM package `conf-gmp`:
+
+  ```sh
+  $ opam install --fake conf-gmp
+  ```
+
 #### Instructions for Linux and Mac OS X ####
 
 0. Install OCaml (version 4.02.2 or later)
@@ -217,14 +223,16 @@ Steps 2 and 3 below require a working OCaml (4.02.2 or later) setup.
   - If you're on Windows see https://github.com/FStarLang/FStar/blob/master/contrib/CoreCrypto/INSTALL.md
    for instructions on how to configure your environment for use with OPAM
 
-3. Install `ocamlfind` and `batteries` using OPAM:
+3. Install `ocamlfind`, `batteries`, `stdint`, and `zarith` using OPAM:
 
-        $ opam install ocamlfind batteries
+  ```sh
+  $ opam install ocamlfind batteries stdint zarith
+  ```
 
 ### Step 2. Extracting the sources of F* itself to OCaml ###
 
 0. Get an F* binary, either using the F#/.NET build process (step 1
-   above; remember to build a Release version, else you'll get a StackOverflowException in 2 below), 
+   above; remember to build a Release version, else you'll get a StackOverflowException in `make ocaml -C src` below), 
    or the OCaml build process (step 3 above).
 
 1. Make sure you follow the instructions above to get a working OCaml setup.

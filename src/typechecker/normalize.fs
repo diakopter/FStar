@@ -45,7 +45,7 @@ type step =
   | UnfoldUntil of S.delta_depth
   | Beta            
   | BetaUVars
-  | Simplify        //Simplifies some basic log cfg ical tautolog cfg ies: not part of definitional equality!
+  | Simplify        //Simplifies some basic logical tautologies: not part of definitional equality!
   | EraseUniverses
   | AllowUnboundUniverses //we erase universes as we encode to SMT; so, sometimes when printing, it's ok to have some unbound universe variables
   //remove the rest?
@@ -71,7 +71,7 @@ let closure_to_string = function
 type cfg = {
     steps: steps;
     tcenv: Env.env;
-    delta_level: Env.delta_level
+    delta_level: Env.delta_level  //?
 }
 
 type branches = list<(pat * option<term> * term)> 
@@ -83,7 +83,7 @@ type stack_elt =
  | UnivArgs of list<universe> * Range.range
  | MemoLazy of memo<(env * term)>
  | Match    of env * branches * Range.range
- | Abs      of env * binders * env * option<lcomp> * Range.range
+ | Abs      of env * binders * env * option<either<lcomp,Ident.lident>> * Range.range //the second env is the first one extended with the binders, for reducing the option<lcomp>
  | App      of term * aqual * Range.range
  | Meta     of S.metadata * Range.range
 
@@ -121,6 +121,17 @@ let is_empty = function
 let lookup_bvar env x = 
     try List.nth env x.index
     with _ -> failwith (Util.format1 "Failed to find %s\n" (Print.db_to_string x))
+
+let rec unfold_effect_abbrev env comp =
+  let c = comp_to_comp_typ comp in
+  match Env.lookup_effect_abbrev env (env.universe_of env c.result_typ) c.effect_name with
+    | None -> c
+    | Some (binders, cdef) ->
+      let binders, cdef = SS.open_comp binders cdef in 
+      let inst = List.map2 (fun (x, _) (t, _) -> NT(x, t)) binders (as_arg c.result_typ::c.effect_args) in
+      let c1 = SS.subst_comp inst cdef in
+      let c = {Util.comp_to_comp_typ c1 with flags=c.flags} |> mk_Comp in
+      unfold_effect_abbrev env c
 
 (********************************************************************************************************************)
 (* Normal form of a universe u is                                                                                   *)
@@ -204,8 +215,7 @@ let rec closure_as_term cfg env t =
             | Tm_name _
             | Tm_fvar _ -> t
 
-            | Tm_uvar(u, t') -> 
-              mk (Tm_uvar(u, closure_as_term_delayed  cfg env t')) t.pos 
+            | Tm_uvar _ -> t //should be closed anyway
 
             | Tm_type u -> 
               mk (Tm_type (norm_universe cfg env u)) t.pos
@@ -357,10 +367,10 @@ and close_comp cfg env c =
                                effect_args=args;
                                flags=flags})  
 
-and close_lcomp_opt cfg env = function 
-    | None -> None
-    | Some lc -> Some ({lc with res_typ=closure_as_term_delayed cfg env lc.res_typ;
-                                comp=(fun () -> close_comp cfg env (lc.comp()))})
+and close_lcomp_opt cfg env lopt = match lopt with
+    | Some (Inl lc) -> //NS: Too expensive to close potentially huge VCs that are hardly read
+      Some (Inr lc.eff_name) //retaining the effect name is sufficient
+    | _ -> lopt
 
 (*******************************************************************)
 (* Simplification steps are not part of definitional equality      *)
@@ -436,6 +446,7 @@ let rec norm : cfg -> env -> stack -> term -> term =
           | Tm_unknown
           | Tm_uvar _ 
           | Tm_constant _
+          | Tm_name _
           | Tm_fvar( {fv_delta=Delta_constant} ) 
           | Tm_fvar( {fv_qual=Some Data_ctor } ) 
           | Tm_fvar( {fv_qual=Some (Record_ctor _)} ) -> //these last three are just constructors; no delta steps can apply
@@ -452,9 +463,6 @@ let rec norm : cfg -> env -> stack -> term -> term =
                  let stack = us::stack in
                  norm cfg env stack t'
      
-          | Tm_name x -> 
-            rebuild cfg env stack t
-           
           | Tm_fvar f -> 
             let should_delta = match cfg.delta_level with 
                 | NoDelta -> false
@@ -504,7 +512,7 @@ let rec norm : cfg -> env -> stack -> term -> term =
                 | UnivArgs _::_ ->
                   failwith "Ill-typed term: universes cannot be applied to term abstraction"
 
-               | Match _::_ -> 
+                | Match _::_ -> 
                   failwith "Ill-typed term: cannot pattern match an abstraction"
 
                 | Arg(c, _, _)::stack -> 
@@ -513,16 +521,42 @@ let rec norm : cfg -> env -> stack -> term -> term =
                       norm cfg (c::env) stack t
 
                     | _ -> 
-                      let body = match bs with 
+                     (* Note: we peel off one application at a time. 
+                              An optimization to attempt would be to push n-args are once, 
+                              and try to pop all of them at once, in the common case of a full application. 
+                      *)
+                      begin match bs with 
                         | [] -> failwith "Impossible"
-                        | [_] -> body
-                        | _::tl -> mk (Tm_abs(tl, body, lopt)) t.pos in
-                      log cfg  (fun () -> Util.print1 "\tShifted %s\n" (closure_to_string c));
-                      norm cfg (c :: env) stack body 
+                        | [_] -> 
+                          begin match lopt with 
+                            | None when (!Options.__test_norm_all) -> 
+                              log cfg  (fun () -> Util.print1 "\tShifted %s\n" (closure_to_string c));
+                              norm cfg (c :: env) stack body 
+
+                            | Some (Inr l) 
+                                when (Ident.lid_equals l Const.effect_Tot_lid
+                                      || Ident.lid_equals l Const.effect_GTot_lid) ->
+                              log cfg  (fun () -> Util.print1 "\tShifted %s\n" (closure_to_string c));
+                              norm cfg (c :: env) stack body 
+
+                            | Some (Inl lc) when (Util.is_tot_or_gtot_lcomp lc) ->
+                              log cfg  (fun () -> Util.print1 "\tShifted %s\n" (closure_to_string c));
+                              norm cfg (c :: env) stack body 
+
+                            | _ -> //can't reduce, as it may not terminate
+                              //printfn "REFUSING TO NORMALIZE APPLICATION BECAUSE IT MAY BE IMPURE: %s" (Print.term_to_string t);
+                              let cfg = {cfg with steps=WHNF::cfg.steps} in
+                              rebuild cfg env stack (closure_as_term cfg env t) //But, if the environment is non-empty, we need to substitute within the term
+                          end
+                        | _::tl -> 
+                          log cfg  (fun () -> Util.print1 "\tShifted %s\n" (closure_to_string c));
+                          let body = mk (Tm_abs(tl, body, lopt)) t.pos in
+                          norm cfg (c :: env) stack body 
+                      end
                   end
 
                 | MemoLazy r :: stack -> 
-                  set_memo r (env, t); //We intentionally do not memoize the strng normal form; only the WHNF
+                  set_memo r (env, t); //We intentionally do not memoize the strong normal form; only the WHNF
                   log cfg  (fun () -> Util.print_string "\tSet memo\n");
                   norm cfg env stack t
 
@@ -533,8 +567,8 @@ let rec norm : cfg -> env -> stack -> term -> term =
                   then rebuild cfg env stack (closure_as_term cfg env t) //But, if the environment is non-empty, we need to substitute within the term
                   else let bs, body, opening = open_term' bs body in 
                        let lopt = match lopt with 
-                        | None -> None
-                        | Some l -> SS.subst_comp opening (l.comp()) |> Util.lcomp_of_comp |> Some in
+                        | Some (Inl l) -> SS.subst_comp opening (l.comp()) |> Util.lcomp_of_comp |> Inl |> Some
+                        | _ -> lopt in
                        let env' = bs |> List.fold_left (fun env _ -> Dummy::env) env in
                        log cfg  (fun () -> Util.print1 "\tShifted %s dummies\n" (string_of_int <| List.length bs));
                        norm cfg env' (Abs(env, bs, env', lopt, t.pos)::stack) body
@@ -643,6 +677,7 @@ and norm_pattern_args cfg env args =
     
 and norm_comp : cfg -> env -> comp -> comp = 
     fun cfg env comp -> 
+        let comp = ghost_to_pure_aux cfg env comp in
         match comp.n with 
             | Total t -> 
               {comp with n=Total (norm cfg env [] t)}
@@ -654,7 +689,35 @@ and norm_comp : cfg -> env -> comp -> comp =
               let norm_args args = args |> List.map (fun (a, i) -> (norm cfg env [] a, i)) in
               {comp with n=Comp ({ct with result_typ=norm cfg env [] ct.result_typ;
                                           effect_args=norm_args ct.effect_args})}
-    
+
+(* Promotes Ghost T, when T is not informative to Pure T
+        Non-informative types T ::= unit | Type u | t -> Tot T | t -> GTot T
+*)
+and ghost_to_pure_aux cfg env c =
+    let norm t = 
+        norm ({cfg with steps=[Inline; UnfoldUntil Delta_constant; EraseUniverses; AllowUnboundUniverses]}) env [] t in
+    let non_info t = non_informative (norm t) in
+    match c.n with
+    | Total _ -> c
+    | GTotal t when non_info t -> {c with n=Total t}
+    | Comp ct ->
+        let l = Env.norm_eff_name cfg.tcenv ct.effect_name in
+        if Util.is_ghost_effect l
+        && non_info ct.result_typ
+        then let ct =
+                if Ident.lid_equals ct.effect_name Const.effect_Ghost_lid
+                then {ct with effect_name=Const.effect_Pure_lid}
+                else if Ident.lid_equals ct.effect_name Const.effect_GTot_lid
+                then {ct with effect_name=Const.effect_Tot_lid}
+                else if Ident.lid_equals ct.effect_name Const.effect_GHOST_lid
+                then {ct with effect_name=Const.effect_PURE_lid}
+                else let ct = unfold_effect_abbrev cfg.tcenv c in //must be GHOST
+                     {ct with effect_name=Const.effect_PURE_lid} in
+             {c with n=Comp ct}
+        else c
+    | _ -> c
+
+     
 and norm_binder : cfg -> env -> binder -> binder = 
     fun cfg env (x, imp) -> {x with sort=norm cfg env [] x.sort}, imp
 
@@ -666,6 +729,19 @@ and norm_binders : cfg -> env -> binders -> binders =
             ([], env)
             bs in
         List.rev nbs
+
+and norm_lcomp_opt : cfg -> env -> option<either<lcomp, Ident.lident>> -> option<either<lcomp, Ident.lident>> = 
+    fun cfg env lopt -> 
+        match lopt with
+        | Some (Inl lc) -> 
+          if Util.is_tot_or_gtot_lcomp lc
+          then let t = norm cfg env [] lc.res_typ in
+               if Util.is_total_lcomp lc
+               then Some (Inl (Util.lcomp_of_comp (S.mk_Total t)))
+               else Some (Inl (Util.lcomp_of_comp (S.mk_GTotal t)))
+          else Some (Inr lc.eff_name)
+       | _ -> lopt
+
 
 and rebuild : cfg -> env -> stack -> term -> term = 
     fun cfg env stack t ->
@@ -684,7 +760,7 @@ and rebuild : cfg -> env -> stack -> term -> term =
 
             | Abs (env', bs, env'', lopt, r)::stack ->
               let bs = norm_binders cfg env' bs in
-              let lopt = close_lcomp_opt cfg env'' lopt in
+              let lopt = norm_lcomp_opt cfg env'' lopt in
               rebuild cfg env stack ({abs bs t lopt with pos=r})
 
             | Arg (Univ _,  _, _)::_
@@ -715,7 +791,7 @@ and rebuild : cfg -> env -> stack -> term -> term =
               let t = S.extend_app head (t,aq) None r in
               rebuild cfg env stack (maybe_simplify cfg.steps t)
 
-            | Match(env, branches, r) :: stack -> 
+            | Match(env, branches, r) :: stack ->
               log cfg  (fun () -> Util.print1 "Rebuilding with match, scrutinee is %s ...\n" (Print.term_to_string t));
               let norm_and_rebuild_match () =
                 let whnf = List.contains WHNF cfg.steps in
@@ -828,6 +904,7 @@ let config s e =
 let normalize s e t = norm (config s e) [] [] t
 let normalize_comp s e t = norm_comp (config s e) [] t
 let normalize_universe env u = norm_universe (config [] env) [] u
+let ghost_to_pure env c = ghost_to_pure_aux (config [] env) [] c
 
 let term_to_string env t = Print.term_to_string (normalize [AllowUnboundUniverses] env t)
 let comp_to_string env c = Print.comp_to_string (norm_comp (config [AllowUnboundUniverses] env) [] c)
@@ -847,18 +924,8 @@ let normalize_refinement steps env t0 =
        | _ -> t in
    aux t
 
-let rec unfold_effect_abbrev env comp =
-  let c = comp_to_comp_typ comp in
-  match Env.lookup_effect_abbrev env (env.universe_of env c.result_typ) c.effect_name with
-    | None -> c
-    | Some (binders, cdef) ->
-      let binders, cdef = SS.open_comp binders cdef in 
-      let inst = List.map2 (fun (x, _) (t, _) -> NT(x, t)) binders (as_arg c.result_typ::c.effect_args) in
-      let c1 = SS.subst_comp inst cdef in
-      let c = {Util.comp_to_comp_typ c1 with flags=c.flags} |> mk_Comp in
-      unfold_effect_abbrev env c
-
 let normalize_sigelt (_:steps) (_:Env.env) (_:sigelt) : sigelt = failwith "NYI: normalize_sigelt"
+
 let eta_expand (_:Env.env) (t:typ) : typ =
     match t.n with 
         | Tm_name x -> 
@@ -867,7 +934,7 @@ let eta_expand (_:Env.env) (t:typ) : typ =
             | [] -> t
             | _ -> 
               let binders, args = binders |> Util.args_of_binders in
-              Util.abs binders (mk_Tm_app t args None t.pos) (Util.lcomp_of_comp c |> Some)
+              Util.abs binders (mk_Tm_app t args None t.pos) (Util.lcomp_of_comp c |> Inl |> Some)
           end
         | _ -> 
           failwith (Util.format2 "NYI: eta_expand(%s) %s" (Print.tag_of_term t) (Print.term_to_string t))

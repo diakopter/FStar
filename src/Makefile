@@ -87,7 +87,7 @@ FSLEX   := $(RUNTIME) $(FSLYDIR)/build/fslex.exe
 .PHONY: msbuild msbuild-clean nuget-restore nuget-clean
 
 # --------------------------------------------------------------------
-all: $(BIN)/fstar.exe
+all: $(BIN)/fstar.exe $(BIN)/tests.exe
 
 # --------------------------------------------------------------------
 z3-x86:
@@ -148,7 +148,7 @@ EXTRACTION_DEPS=$(addprefix $(BIN)/, basic.dll absyn.dll syntax.dll format.dll t
 $(BIN)/extraction.dll: $(EXTRACTION_DEPS) $(EXTRACTION_SRC)
 	$(FSC) $(OTHERFLAGS) -a -o $@ $(BASELIBS) $(addprefix -r , $(EXTRACTION_DEPS)) $(EXTRACTION_SRC)
 
-PARSER_DEPS=$(addprefix $(BIN)/, basic.dll absyn.dll tc.dll syntax.dll)
+PARSER_DEPS=$(addprefix $(BIN)/, basic.dll absyn.dll tc.dll syntax.dll typechecker.dll)
 $(BIN)/parser.dll: $(PARSER_DEPS) $(PARSER_SRC)
 	$(FSC)  $(OTHERFLAGS) -a -o $@ $(BASELIBS) $(addprefix -r , $(PARSER_DEPS)) $(PARSER_SRC)
 
@@ -177,6 +177,14 @@ else
 	cp $(BIN)/fstar-mono.sh $(BIN)/fstar.exe
 endif
 
+TESTS_SRC=$(addprefix tests/, pars.fs util.fs norm.fs unif.fs test.fs)
+$(BIN)/tests.exe: $(FSTAR_DEPS) $(TOPLEVEL_SRC) $(TESTS_SRC) $(BIN)/tests-mono.sh
+ifeq ($(OS),Windows_NT)
+	$(FSC)  $(OTHERFLAGS) -o $@ $(BASELIBS) $(addprefix -r , $(FSTAR_DEPS)) $(TOPLEVEL_SRC) $(TESTS_SRC)
+else
+	$(FSC)  $(OTHERFLAGS) -o $(BIN)/tests-mono.exe $(BASELIBS) $(addprefix -r , $(FSTAR_DEPS)) $(TOPLEVEL_SRC) $(TESTS_SRC)
+	cp $(BIN)/tests-mono.sh $(BIN)/tests.exe
+endif
 
 wc: $(BASIC_SRC) $(ABSYN_SRC) $(PARSER_NOGEN_SRC) $(TC_SRC) $(TOSMT_SRC) $(FORMAT_SRC) $(EXTRACTION_SRC) fstar/fstar.fs
 	sloccount $^
@@ -212,8 +220,8 @@ ALL_SOURCES=FStar.Options.fst FStar.Ident.fst FStar.Const.fst \
 	    	FStar.Syntax.Syntax.fst FStar.Syntax.Const.fst FStar.Syntax.Subst.fst FStar.Syntax.Free.fst FStar.Syntax.InstFV.fst FStar.Syntax.Util.fst FStar.Syntax.Print.fst \
 	    	FStar.Tc.Env.fst FStar.Tc.Recheck.fst FStar.Tc.Normalize.fst FStar.Tc.Errors.fst FStar.Tc.Rel.fst FStar.Tc.Util.fst FStar.Tc.Tc.fst \
 	    	FStar.ToSMT.Term.fst FStar.ToSMT.Z3.fst FStar.ToSMT.SplitQueryCases.fst FStar.ToSMT.Encode.fst \
-	    	FStar.Parser.AST.fst FStar.Parser.DesugarEnv.fst FStar.Parser.Desugar.fst FStar.Parser.Env.fst FStar.Parser.Interleave.fst FStar.Parser.ToSyntax.fst FStar.Parser.Parse.fsti FStar.Parser.Lexhelp.fst FStar.Parser.ParseIt.fsti FStar.Parser.Driver.fst FStar.Parser.Dep.fst \
-		FStar.TypeChecker.Common.fst FStar.TypeChecker.Env.fst FStar.TypeChecker.Normalize.fst FStar.TypeChecker.Errors.fst FStar.TypeChecker.Rel.fst FStar.TypeChecker.Util.fst FStar.TypeChecker.Tc.fst \
+	    	FStar.TypeChecker.Common.fst FStar.TypeChecker.Env.fst FStar.TypeChecker.Normalize.fst FStar.TypeChecker.Errors.fst FStar.TypeChecker.Rel.fst FStar.TypeChecker.Util.fst FStar.TypeChecker.Tc.fst \
+		FStar.Parser.AST.fst FStar.Parser.DesugarEnv.fst FStar.Parser.Desugar.fst FStar.Parser.Env.fst FStar.Parser.Interleave.fst FStar.Parser.ToSyntax.fst FStar.Parser.Parse.fsti FStar.Parser.Lexhelp.fst FStar.Parser.ParseIt.fsti FStar.Parser.Driver.fst FStar.Parser.Dep.fst \
 		FStar.Extraction.ML.Syntax.fst FStar.Extraction.ML.Env.fst FStar.Extraction.ML.UEnv.fst FStar.Extraction.ML.Util.fst FStar.Extraction.ML.Code.fst FStar.Extraction.ML.ExtractTyp.fst FStar.Extraction.ML.ExtractExp.fst FStar.Extraction.ML.ExtractMod.fst FStar.Extraction.ML.Term.fst FStar.Extraction.ML.Modul.fst  \
 	    	FStar.SMTEncoding.Term.fst FStar.SMTEncoding.Z3.fst FStar.SMTEncoding.SplitQueryCases.fst FStar.SMTEncoding.ErrorReporting.fst FStar.SMTEncoding.Encode.fst \
 	    	FStar.Dependences.fst FStar.Interactive.fst FStar.Stratified.fst FStar.Universal.fst FStar.FStar.fst
@@ -304,9 +312,10 @@ clean-boot-fs:
 # Testing
 # --------------------------------------------------------------------
 
-test:   clean $(BIN)/fstar.exe ocaml-test regressions
+test:   clean $(BIN)/fstar.exe $(BIN)/tests.exe ocaml-test regressions
 
 regressions:
+	$(BIN)/tests.exe
 	make -C ../lib
 	make -C ../ulib
 	make -C ../examples

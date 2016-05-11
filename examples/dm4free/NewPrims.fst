@@ -99,14 +99,19 @@ val pure2_app : #a:Type -> #t1:Type -> #t2:Type ->
                 Tot (pure2_gctx a t2)
 let pure2_app #a #t1 #t2 l r = fun p -> l p (r p)
 
-val pure2_flip : #a:Type -> #t1:Type -> #t2:Type ->
+val pure2_push : #a:Type -> #t1:Type -> #t2:Type ->
                 f:(t1 -> Tot (pure2_gctx a t2)) ->
                 Tot (pure2_ctx a (t1->GTot t2))
-let pure2_flip #a #t1 #t2 f = fun p -> fun e1 -> f e1 p
+let pure2_push #a #t1 #t2 f = fun p -> fun e1 -> f e1 p
 
 (* WP is a particular *ghost* context *)
 type pure2_wp (a:Type) = pure2_gctx a Type0
 
+// Under the assumption that wp1 and wp2 are monotonic (in fact, only
+// the monotonicity of one is needed) this is equivalent to the old
+// notion of pointwise implication. If the SMT has trouble with this new
+// definition, we could use the other one either asking the user for a
+// proof or trusting it at his own risk.
 type pure2_stronger (a:Type) (wp1:pure2_wp a) (wp2:pure2_wp a) =
   forall p1 p2. (
     (forall (x:a). p1 x ==> p2 x) ==> (wp1 p1 ==> wp2 p2)
@@ -116,13 +121,13 @@ type pure2_stronger (a:Type) (wp1:pure2_wp a) (wp2:pure2_wp a) =
 val pure2_return : a:Type -> x:a -> Tot (pure2_wp a)
 let pure2_return a x p = p x
 
-inline let pure2_bind_wlp (a:Type) (b:Type)
+inline let pure2_bind_wlp (r:range) (a:Type) (b:Type)
                    (wlp1:pure2_wp a) (wlp2:(a -> GTot (pure2_wp b))) =
                    fun p -> wlp1 (fun (x:a) -> wlp2 x p)
-inline let pure2_bind_wp  (a:Type) (b:Type)
+inline let pure2_bind_wp (r:range) (a:Type) (b:Type)
                    (wp1:pure2_wp a) (wlp1:pure2_wp a)
                    (wp2: (a -> GTot (pure2_wp b))) (wlp2: (a -> GTot (pure2_wp b))) =
-     pure2_bind_wlp a b wp1 wp2
+     pure2_bind_wlp r a b wp1 wp2
 
 (* Null wp, which we can't define in terms of the previous *)
 
@@ -173,7 +178,7 @@ val pure2_close_wp : a:Type -> b:Type ->
                     f:(b->Tot (pure2_wp a)) ->
                     Tot (pure2_wp a)
 let pure2_close_wp a b f = pure2_app (pure2_pure l_Forall)
-                                    (pure2_flip f)
+                                    (pure2_push f)
 
 val pure2_assert_p : a:Type -> q:Type0 -> pure2_wp a -> Tot (pure2_wp a)
 let pure2_assert_p a q wp = pure2_app (pure2_pure (l_and q)) wp
@@ -218,7 +223,7 @@ type st2_gctx (heap:Type) (a:Type) (e:Type) =
 
 val st2_pure : #heap:Type -> #a:Type -> #t:Type -> x:t ->
                         Tot (st2_ctx heap a t)
-let st2_pure #heap #a #t x = fun _ -> fun _ -> x
+let st2_pure #heap #a #t x = fun p h -> x
 
 val st2_app : #heap:Type -> #a:Type -> #t1:Type -> #t2:Type ->
                 l:st2_gctx heap a (t1 -> GTot t2) ->
@@ -226,10 +231,10 @@ val st2_app : #heap:Type -> #a:Type -> #t1:Type -> #t2:Type ->
                 Tot (st2_gctx heap a t2)
 let st2_app #heap #a #t1 #t2 l r = fun p h -> l p h (r p h)
 
-val st2_flip : #heap:Type -> #a:Type -> #t1:Type -> #t2:Type ->
+val st2_push : #heap:Type -> #a:Type -> #t1:Type -> #t2:Type ->
                 f:(t1 -> Tot (st2_gctx heap a t2)) ->
                 Tot (st2_ctx heap a (t1->GTot t2))
-let st2_flip #heap #a #t1 #t2 f = fun p -> fun h -> fun e1 -> f e1 p h
+let st2_push #heap #a #t1 #t2 f = fun p -> fun h -> fun e1 -> f e1 p h
 
 type st2_wp (heap:Type) (a:Type) = st2_gctx heap a Type0
 
@@ -243,12 +248,12 @@ type st2_stronger (heap:Type) (a:Type) (wp1:st2_wp heap a)
 val st2_return : heap:Type -> a:Type -> x:a -> Tot (st2_wp heap a)
 let st2_return _ a x p = fun h -> p x h
 
-inline let st2_bind_wp       (heap:Type) (a:Type) (b:Type)
+inline let st2_bind_wp      (heap:Type) (r:range) (a:Type) (b:Type)
                             (wp1:st2_wp heap a) (wlp1:st2_wp heap a)
                             (wp2:(a -> GTot (st2_wp heap b))) (wlp2:(a -> GTot (st2_wp heap b)))
                             = fun p h0 ->
      wp1 (fun a h1 -> wp2 a p h1) h0
-inline let st2_bind_wlp      (heap:Type) (a:Type) (b:Type)
+inline let st2_bind_wlp      (heap:Type) (r:range) (a:Type) (b:Type)
                              (wlp1:st2_wp heap a) (wlp2:(a -> GTot (st2_wp heap b)))
                             = fun p h0 ->
      wlp1 (fun a h1 -> wlp2 a p h1) h0
@@ -303,7 +308,7 @@ val st2_close_wp : heap:Type -> a:Type -> b:Type ->
                     f:(b->Tot (st2_wp heap a)) ->
                     Tot (st2_wp heap a)
 let st2_close_wp heap a b f = st2_app (st2_pure l_Forall)
-                                      (st2_flip f)
+                                      (st2_push f)
 
 val st2_assert_p : heap:Type ->a:Type -> q:Type0 -> st2_wp heap a ->
                      Tot (st2_wp heap a)
@@ -333,6 +338,17 @@ new_effect {
      ; trivial      = st2_trivial heap
 }
 
+new_effect_for_free {
+  STATE2_h_for_free (heap:Type) : result:Type -> wp:st2_wp heap result -> wlp:st2_wp heap result -> Effect
+  with return       = st2_return heap
+     ; bind_wp      = st2_bind_wp heap
+     ; bind_wlp     = st2_bind_wlp heap
+     ; ite_wlp      = st2_ite_wlp heap
+     ; ite_wp       = st2_ite_wp heap
+     ; wp_as_type   = st2_wp_as_type heap
+     ; null_wp      = st2_null_wp heap
+}
+
 (* Ex *)
 type result (a:Type) =
   | V   : v:a -> result a
@@ -353,10 +369,10 @@ val ex2_app : #a:Type -> #t1:Type -> #t2:Type ->
                 Tot (ex2_gctx a t2)
 let ex2_app #a #t1 #t2 l r = fun p -> l p (r p)
 
-val ex2_flip : #a:Type -> #t1:Type -> #t2:Type ->
+val ex2_push : #a:Type -> #t1:Type -> #t2:Type ->
                 f:(t1 -> Tot (ex2_gctx a t2)) ->
                 Tot (ex2_ctx a (t1->GTot t2))
-let ex2_flip #a #t1 #t2 f = fun p -> fun e1 -> f e1 p
+let ex2_push #a #t1 #t2 f = fun p -> fun e1 -> f e1 p
 
 (* WP is a particular *ghost* context *)
 type ex2_wp (a:Type) = ex2_gctx a Type0
@@ -370,14 +386,14 @@ type ex2_stronger (a:Type) (wp1:ex2_wp a) (wp2:ex2_wp a) =
 val ex2_return : a:Type -> x:a -> Tot (ex2_wp a)
 let ex2_return a x p = p (V x)
 
-inline let ex2_bind_wlp (a:Type) (b:Type) (wlp1:ex2_wp a) (wlp2:(a -> GTot (ex2_wp b))) = fun p ->
+inline let ex2_bind_wlp (r:range) (a:Type) (b:Type) (wlp1:ex2_wp a) (wlp2:(a -> GTot (ex2_wp b))) = fun p ->
    (forall (rb:result b). p rb \/ wlp1 (fun ra1 -> if is_V ra1
                                           then wlp2 (V.v ra1) (fun rb2 -> rb2=!=rb)
                                           else ra1 =!= rb))
-inline let ex2_bind_wp (a:Type) (b:Type)
+inline let ex2_bind_wp (r:range) (a:Type) (b:Type)
 		       (wp1:ex2_wp a) (wlp1:ex2_wp a)
 		       (wp2:(a -> GTot (ex2_wp b))) (wlp2:(a -> GTot (ex2_wp b))) = fun p ->
-   ex2_bind_wlp a b wlp1 wlp2 p
+   ex2_bind_wlp r a b wlp1 wlp2 p
    /\ wp1 (fun ra1 -> if is_V ra1
                    then wp2 (V.v ra1) (fun rb2 -> True)
                    else True)
@@ -430,7 +446,7 @@ val ex2_close_wp : a:Type -> b:Type ->
                     f:(b->Tot (ex2_wp a)) ->
                     Tot (ex2_wp a)
 let ex2_close_wp a b f = ex2_app (ex2_pure l_Forall)
-                                    (ex2_flip f)
+                                    (ex2_push f)
 
 val ex2_assert_p : a:Type -> q:Type0 -> ex2_wp a -> Tot (ex2_wp a)
 let ex2_assert_p a q wp = ex2_app (ex2_pure (l_and q)) wp
@@ -478,10 +494,10 @@ val all2_app : #heap:Type -> #a:Type -> #t1:Type -> #t2:Type ->
                 Tot (all2_gctx heap a t2)
 let all2_app #heap #a #t1 #t2 l r = fun p h -> l p h (r p h)
 
-val all2_flip : #heap:Type -> #a:Type -> #t1:Type -> #t2:Type ->
+val all2_push : #heap:Type -> #a:Type -> #t1:Type -> #t2:Type ->
                 f:(t1 -> Tot (all2_gctx heap a t2)) ->
                 Tot (all2_ctx heap a (t1->GTot t2))
-let all2_flip #heap #a #t1 #t2 f = fun p -> fun h -> fun e1 -> f e1 p h
+let all2_push #heap #a #t1 #t2 f = fun p -> fun h -> fun e1 -> f e1 p h
 
 type all2_wp (heap:Type) (a:Type) = all2_gctx heap a Type0
 
@@ -495,12 +511,12 @@ type all2_stronger (heap:Type) (a:Type) (wp1:all2_wp heap a)
 val all2_return : heap:Type -> a:Type -> x:a -> Tot (all2_wp heap a)
 let all2_return _ a x p = fun h -> p (V x) h
 
-inline let all2_bind_wp (heap:Type) (a:Type) (b:Type)
+inline let all2_bind_wp (heap:Type) (r:range) (a:Type) (b:Type)
                         (wp1:all2_wp heap a) (wlp1:all2_wp heap a)
                         (wp2:(a -> GTot (all2_wp heap b))) (wlp2:(a -> GTot (all2_wp heap b))) = fun p h0 ->
    (wp1 (fun ra h1 -> is_V ra ==> wp2 (V.v ra) p h1) h0)
 
-inline let all2_bind_wlp (heap:Type) (a:Type) (b:Type)
+inline let all2_bind_wlp (heap:Type) (r:range) (a:Type) (b:Type)
                          (wlp1:all2_wp heap a) (wlp2: (a -> GTot (all2_wp heap b))) =
    fun (p : result b -> heap -> GTot Type0) (h0 : heap) ->
    (forall rb h. wlp1 (fun ra h1 ->
@@ -553,7 +569,7 @@ val all2_close_wp : heap:Type -> a:Type -> b:Type ->
                     f:(b->Tot (all2_wp heap a)) ->
                     Tot (all2_wp heap a)
 let all2_close_wp heap a b f = all2_app (all2_pure l_Forall)
-                                        (all2_flip f)
+                                        (all2_push f)
 
 val all2_assert_p : heap:Type ->a:Type -> q:Type0 -> all2_wp heap a ->
                      Tot (all2_wp heap a)

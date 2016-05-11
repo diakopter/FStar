@@ -100,7 +100,7 @@ let filter_imp a = a |> List.filter (function (_, Some (Implicit _)) -> false | 
 let rec reconstruct_lex (e:exp) =
   match (compress e).n with
   | Tm_app (f, args) ->
-       let args = filter_imp args in
+      let args = filter_imp args in
       let exps = List.map fst args in
       if is_lex_cons f && List.length exps = 2 then
         match reconstruct_lex (List.nth exps 1) with
@@ -226,7 +226,7 @@ let rec term_to_string x =
   | Tm_arrow(bs, c) ->  Util.format2 "(%s -> %s)"  (binders_to_string " -> " bs) (comp_to_string c)
   | Tm_abs(bs, t2, lc) ->  
     begin match lc with 
-        | Some l when !Options.print_implicits -> 
+        | Some (Inl l) when !Options.print_implicits -> 
           Util.format3 "(fun %s -> (%s $$ %s))" (binders_to_string " " bs) (term_to_string t2) (comp_to_string <| l.comp())
         | _ -> 
          Util.format2 "(fun %s -> %s)" (binders_to_string " " bs) (term_to_string t2)
